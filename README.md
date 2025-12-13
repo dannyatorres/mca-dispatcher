@@ -25,9 +25,10 @@ cp .env.example .env
 
 Edit `.env`:
 ```env
-DATABASE_URL=postgresql://username:password@host:5432/database
 BACKEND_URL=https://your-crm-backend.up.railway.app
 ```
+
+**Note**: You only need `BACKEND_URL`. The dispatcher no longer connects directly to the database - all database operations are handled by the backend API.
 
 ### 3. Run the Dispatcher
 ```bash
