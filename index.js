@@ -3,16 +3,22 @@ const { Pool } = require('pg');
 const axios = require('axios');
 
 // --- CONFIGURATION ---
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL; 
+// Point to your own backend instead of n8n
+const BACKEND_URL = process.env.BACKEND_URL || process.env.N8N_WEBHOOK_URL; // Support legacy var name
+const AI_ENDPOINT = `${BACKEND_URL}/api/ai/process-lead`;
+
 const BATCH_SIZE = 10;       // Max leads to process per run
 const WAIT_TIME_MS = 5000;   // 5 Seconds (Twilio Safety Buffer)
 const RUN_INTERVAL_MS = 15 * 60 * 1000; // Run every 15 minutes
 
 // Check for missing URL
-if (!N8N_WEBHOOK_URL) {
-    console.error("❌ ERROR: N8N_WEBHOOK_URL is missing from Environment Variables.");
+if (!BACKEND_URL) {
+    console.error("❌ ERROR: BACKEND_URL is missing from Environment Variables.");
+    console.error("   Set BACKEND_URL to your CRM backend (e.g., https://your-crm.up.railway.app)");
     process.exit(1);
 }
+
+console.log(`🔗 AI Endpoint: ${AI_ENDPOINT}`);
 
 // Database Connection
 const pool = new Pool({
@@ -77,26 +83,32 @@ async function runDispatcher() {
             }
 
             try {
-                // 1. Call your n8n AI Agent
-                await axios.post(N8N_WEBHOOK_URL, {
+                // 1. Call your backend AI Agent (replaces n8n)
+                const response = await axios.post(AI_ENDPOINT, {
                     conversation_id: lead.id,
                     system_instruction: instruction
                 });
 
+                console.log(`✅ AI processed lead ${lead.id}:`, response.data);
+
                 // 2. Update 'last_activity' to prevent infinite loops
-                // We set state to 'ACTIVE' if it was 'NEW' so we don't send the intro twice
+                // We set state to 'INITIAL_CONTACT' if it was 'NEW' so we don't send the intro twice
                 await client.query(`
-                    UPDATE conversations 
+                    UPDATE conversations
                     SET last_activity = NOW(),
                         state = CASE WHEN state = 'NEW' THEN 'INITIAL_CONTACT' ELSE state END
                     WHERE id = $1
                 `, [lead.id]);
 
-                // 3. THOTTLE: Wait 5 seconds before the next one
+                // 3. THROTTLE: Wait 5 seconds before the next one
                 await new Promise(r => setTimeout(r, WAIT_TIME_MS));
 
             } catch (err) {
                 console.error(`❌ Failed to trigger for ${lead.id}:`, err.message);
+                if (err.response) {
+                    console.error(`   Status: ${err.response.status}`);
+                    console.error(`   Data:`, err.response.data);
+                }
             }
         }
 
