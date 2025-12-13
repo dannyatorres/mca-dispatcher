@@ -77,11 +77,18 @@ async function runDispatcher() {
             }
 
             try {
-                // CALL YOUR BACKEND API (This is the only HTTP part)
-                await axios.post(BACKEND_URL, {
+                // CALL YOUR BACKEND API
+                const response = await axios.post(BACKEND_URL, {
                     conversation_id: lead.id,
                     system_instruction: instruction
                 });
+
+                // ✅ NEW LOGGING: Print exactly what the AI said
+                if (response.data.action === 'sent_message') {
+                    console.log(`🗣️ AI SAID: "${response.data.ai_reply}"`);
+                } else {
+                    console.log(`🤫 AI stayed silent (Action: ${response.data.action})`);
+                }
 
                 // UPDATE DB: Prevent loop
                 await client.query(`
