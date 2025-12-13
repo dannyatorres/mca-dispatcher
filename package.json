@@ -1,0 +1,14 @@
+{
+  "name": "mca-dispatcher",
+  "version": "1.0.0",
+  "description": "Throttled dispatcher for AI Agent",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3"
+  }
+}
