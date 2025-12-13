@@ -25,10 +25,10 @@ cp .env.example .env
 
 Edit `.env`:
 ```env
-BACKEND_URL=https://your-crm-backend.up.railway.app
+DATABASE_URL=postgresql://username:password@host:5432/database
 ```
 
-**Note**: You only need `BACKEND_URL`. The dispatcher no longer connects directly to the database - all database operations are handled by the backend API.
+The dispatcher connects directly to the database to query leads, then calls the backend API at `https://mcagent.io/api/agent/trigger` to process them.
 
 ### 3. Run the Dispatcher
 ```bash

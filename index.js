@@ -1,99 +1,112 @@
 require('dotenv').config();
+const { Pool } = require('pg');
 const axios = require('axios');
 
 // --- CONFIGURATION ---
-// Point to your own backend instead of n8n
-const BACKEND_URL = process.env.BACKEND_URL || process.env.N8N_WEBHOOK_URL; // Support legacy var name
+// 1. Point to your Backend API Trigger
+const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
+// 2. Database Connection (Required to find the leads)
+const DATABASE_URL = process.env.DATABASE_URL;
 
 const BATCH_SIZE = 10;       // Max leads to process per run
-const WAIT_TIME_MS = 5000;   // 5 Seconds (Twilio Safety Buffer)
+const WAIT_TIME_MS = 5000;   // 5 Seconds between texts
 const RUN_INTERVAL_MS = 15 * 60 * 1000; // Run every 15 minutes
 
-// Check for missing URL
-if (!BACKEND_URL) {
-    console.error("❌ ERROR: BACKEND_URL is missing from Environment Variables.");
-    console.error("   Set BACKEND_URL to your CRM backend (e.g., https://your-crm.up.railway.app)");
+if (!DATABASE_URL) {
+    console.error("❌ ERROR: DATABASE_URL is missing.");
     process.exit(1);
 }
 
-console.log(`🔗 Backend URL: ${BACKEND_URL}`);
+const pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+});
 
 async function runDispatcher() {
     console.log('⏰ Starting Dispatcher Run:', new Date().toISOString());
+    let client;
 
     try {
-        // 1. FIND LEADS that need processing (from backend API)
-        console.log('🔍 Fetching leads from backend...');
-        const findResponse = await axios.get(`${BACKEND_URL}/api/dispatcher/find-leads`, {
-            params: { limit: BATCH_SIZE }
-        });
+        client = await pool.connect();
 
-        if (!findResponse.data.success) {
-            console.error('❌ Failed to find leads:', findResponse.data.error);
-            return;
-        }
+        // QUERY: Find 'NEW' leads (>5 mins old) OR 'STALE' leads (No reply in 24h)
+        const query = `
+            SELECT
+                c.id,
+                c.lead_phone,
+                c.state,
+                c.business_name,
+                EXTRACT(EPOCH FROM (NOW() - COALESCE(last_msg.timestamp, c.created_at)))/3600 as hours_since_last_action
+            FROM conversations c
+            LEFT JOIN LATERAL (
+                SELECT direction, timestamp
+                FROM messages m
+                WHERE m.conversation_id = c.id
+                ORDER BY m.timestamp DESC
+                LIMIT 1
+            ) last_msg ON true
+            WHERE
+                c.state NOT IN ('DEAD', 'ARCHIVED', 'FUNDED')
+                AND (
+                    (c.state = 'NEW' AND c.last_activity < NOW() - INTERVAL '5 minutes')
+                    OR
+                    (last_msg.direction = 'outbound' AND last_msg.timestamp < NOW() - INTERVAL '24 hours')
+                )
+                AND c.last_activity < NOW() - INTERVAL '1 hour'
+            LIMIT $1
+        `;
 
-        const leads = findResponse.data.leads || [];
+        const { rows } = await client.query(query, [BATCH_SIZE]);
 
-        if (leads.length === 0) {
+        if (rows.length === 0) {
             console.log('✅ No leads need attention right now.');
             return;
         }
 
-        console.log(`📋 Found ${leads.length} leads to process. Starting loop...`);
+        console.log(`found ${rows.length} leads to process. Starting loop...`);
 
-        // 2. PROCESS EACH LEAD
-        for (const lead of leads) {
-            console.log(`🚀 Triggering AI for ${lead.state} lead: ${lead.business_name || lead.lead_phone}`);
+        // --- THE LOOP ---
+        for (const lead of rows) {
+            console.log(`🚀 Triggering AI for ${lead.state} lead: ${lead.business_name}`);
 
-            // Determine the instruction based on state
             let instruction = "";
             if (lead.state === 'NEW') {
-                instruction = "This is a NEW lead. Send an initial friendly outreach message introduction.";
+                instruction = "This is a NEW lead. Send an initial friendly outreach message.";
             } else {
-                instruction = `User hasn't replied in ${Math.round(lead.hours_since_last_action)} hours. Review history and send a polite follow-up.`;
+                instruction = `User hasn't replied in ${Math.round(lead.hours_since_last_action)} hours. Send a polite follow-up.`;
             }
 
             try {
-                // A. Call AI Agent to process lead
-                const agentResponse = await axios.post(`${BACKEND_URL}/api/agent/trigger`, {
+                // CALL YOUR BACKEND API (This is the only HTTP part)
+                await axios.post(BACKEND_URL, {
                     conversation_id: lead.id,
                     system_instruction: instruction
                 });
 
-                console.log(`✅ AI processed lead ${lead.id}:`, agentResponse.data);
+                // UPDATE DB: Prevent loop
+                await client.query(`
+                    UPDATE conversations
+                    SET last_activity = NOW(),
+                        state = CASE WHEN state = 'NEW' THEN 'INITIAL_CONTACT' ELSE state END
+                    WHERE id = $1
+                `, [lead.id]);
 
-                // B. Mark lead as processed (updates last_activity timestamp)
-                await axios.post(`${BACKEND_URL}/api/dispatcher/mark-processed`, {
-                    conversation_id: lead.id
-                });
-
-                console.log(`✅ Lead ${lead.id} marked as processed`);
-
-                // C. THROTTLE: Wait 5 seconds before the next one
+                // Wait 5s
                 await new Promise(r => setTimeout(r, WAIT_TIME_MS));
 
             } catch (err) {
-                console.error(`❌ Failed to process lead ${lead.id}:`, err.message);
-                if (err.response) {
-                    console.error(`   Status: ${err.response.status}`);
-                    console.error(`   Data:`, err.response.data);
-                }
+                console.error(`❌ Failed to trigger for ${lead.id}:`, err.response?.data || err.message);
             }
         }
 
-        console.log('✅ Dispatcher run completed');
-
     } catch (err) {
-        console.error('🔥 Critical Dispatcher Error:', err.message);
-        if (err.response) {
-            console.error('   Response Status:', err.response.status);
-            console.error('   Response Data:', err.response.data);
-        }
+        console.error('🔥 Critical Dispatcher Error:', err);
+    } finally {
+        if (client) client.release();
     }
 }
 
-// Start the loop
+// Start
 console.log('🚀 Dispatcher Service Started');
-runDispatcher(); // Run once immediately on start
-setInterval(runDispatcher, RUN_INTERVAL_MS); // Then repeat every 15 mins
+runDispatcher();
+setInterval(runDispatcher, RUN_INTERVAL_MS);
