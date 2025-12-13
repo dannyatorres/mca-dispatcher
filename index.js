@@ -5,7 +5,7 @@ const axios = require('axios');
 // --- CONFIGURATION ---
 // Point to your own backend instead of n8n
 const BACKEND_URL = process.env.BACKEND_URL || process.env.N8N_WEBHOOK_URL; // Support legacy var name
-const AI_ENDPOINT = `${BACKEND_URL}/api/ai/process-lead`;
+const AI_ENDPOINT = `${BACKEND_URL}/api/agent/trigger`;
 
 const BATCH_SIZE = 10;       // Max leads to process per run
 const WAIT_TIME_MS = 5000;   // 5 Seconds (Twilio Safety Buffer)
