@@ -5,12 +5,12 @@ const axios = require('axios');
 // --- CONFIGURATION ---
 // 1. Point to your Backend API Trigger
 const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
-// 2. Database Connection (Required to find the leads)
+// 2. Database Connection
 const DATABASE_URL = process.env.DATABASE_URL;
 
 const BATCH_SIZE = 10;       // Max leads to process per run
 const WAIT_TIME_MS = 5000;   // 5 Seconds between texts
-const RUN_INTERVAL_MS = 15 * 60 * 1000; // Run every 15 minutes
+const RUN_INTERVAL_MS = 5 * 60 * 1000; // <--- CHANGED: Run every 5 minutes (was 15)
 
 if (!DATABASE_URL) {
     console.error("❌ ERROR: DATABASE_URL is missing.");
@@ -29,7 +29,7 @@ async function runDispatcher() {
     try {
         client = await pool.connect();
 
-        // QUERY: Find 'NEW' leads (>5 mins old) OR 'STALE' leads (No reply in 24h)
+        // QUERY: Find 'NEW' leads OR 'STALE' leads
         const query = `
             SELECT
                 c.id,
@@ -48,14 +48,15 @@ async function runDispatcher() {
             WHERE
                 c.state NOT IN ('DEAD', 'ARCHIVED', 'FUNDED')
                 AND (
-                    -- RULE 1: If NEW, check after just 5 minutes
-                    (c.state = 'NEW' AND c.last_activity < NOW() - INTERVAL '5 minutes')
+                    -- RULE 1: If NEW, check after 5 minutes
+                    -- FIX: We use COALESCE to check created_at if last_activity is NULL
+                    (c.state = 'NEW' AND COALESCE(c.last_activity, c.created_at) < NOW() - INTERVAL '5 minutes')
                     OR
                     -- RULE 2: If STALE (no reply in 24h), check if we haven't touched it in 1h
                     (
                         last_msg.direction = 'outbound'
                         AND last_msg.timestamp < NOW() - INTERVAL '24 hours'
-                        AND c.last_activity < NOW() - INTERVAL '1 hour'
+                        AND COALESCE(c.last_activity, c.created_at) < NOW() - INTERVAL '1 hour'
                     )
                 )
             LIMIT $1
@@ -88,14 +89,13 @@ async function runDispatcher() {
                     system_instruction: instruction
                 });
 
-                // ✅ NEW LOGGING: Print exactly what the AI said
                 if (response.data.action === 'sent_message') {
                     console.log(`🗣️ AI SAID: "${response.data.ai_reply}"`);
                 } else {
                     console.log(`🤫 AI stayed silent (Action: ${response.data.action})`);
                 }
 
-                // UPDATE DB: Prevent loop
+                // UPDATE DB
                 await client.query(`
                     UPDATE conversations
                     SET last_activity = NOW(),
@@ -119,6 +119,6 @@ async function runDispatcher() {
 }
 
 // Start
-console.log('🚀 Dispatcher Service Started');
+console.log('🚀 Dispatcher Service Started (Interval: 5 mins)');
 runDispatcher();
 setInterval(runDispatcher, RUN_INTERVAL_MS);
