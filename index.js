@@ -48,11 +48,16 @@ async function runDispatcher() {
             WHERE
                 c.state NOT IN ('DEAD', 'ARCHIVED', 'FUNDED')
                 AND (
+                    -- RULE 1: If NEW, check after just 5 minutes
                     (c.state = 'NEW' AND c.last_activity < NOW() - INTERVAL '5 minutes')
                     OR
-                    (last_msg.direction = 'outbound' AND last_msg.timestamp < NOW() - INTERVAL '24 hours')
+                    -- RULE 2: If STALE (no reply in 24h), check if we haven't touched it in 1h
+                    (
+                        last_msg.direction = 'outbound'
+                        AND last_msg.timestamp < NOW() - INTERVAL '24 hours'
+                        AND c.last_activity < NOW() - INTERVAL '1 hour'
+                    )
                 )
-                AND c.last_activity < NOW() - INTERVAL '1 hour'
             LIMIT $1
         `;
 
