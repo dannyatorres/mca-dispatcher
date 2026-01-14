@@ -141,7 +141,9 @@ function checkMorningRun() {
         console.log('🌅 9am EST - Triggering morning follow-up');
         lastMorningRun = today;
 
-        axios.post('https://mcagent.io/api/agent/morning-followup')
+        axios.post('https://mcagent.io/api/agent/morning-followup', {}, {
+            headers: { 'x-internal-secret': process.env.INTERNAL_API_SECRET }
+        })
             .then(res => console.log('🌅 Morning follow-up result:', res.data))
             .catch(err => console.error('🌅 Morning follow-up failed:', err.message));
     }
