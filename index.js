@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 const axios = require('axios');
+const { runMorningFollowUp } = require('./services/morningFollowUp');
 
 // --- CONFIGURATION ---
 const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
@@ -122,3 +123,22 @@ async function runDispatcher() {
 
 runDispatcher();
 setInterval(runDispatcher, RUN_INTERVAL_MS);
+
+// --- MORNING FOLLOW-UP SCHEDULER ---
+let lastMorningRun = null;
+
+function checkMorningRun() {
+    const now = new Date();
+    const est = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const today = est.toDateString();
+
+    // Run at 9am EST, only once per day
+    if (est.getHours() === 9 && lastMorningRun !== today) {
+        console.log('🌅 9am EST - Triggering morning follow-up');
+        lastMorningRun = today;
+        runMorningFollowUp();
+    }
+}
+
+// Check every minute for morning run
+setInterval(checkMorningRun, 60 * 1000);
