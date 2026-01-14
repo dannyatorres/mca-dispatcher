@@ -128,15 +128,16 @@ let lastMorningRun = null;
 
 function checkMorningRun() {
     const now = new Date();
-    const est = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const today = est.toDateString();
+    const estTime = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
+    const estHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+    const today = now.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
 
-    // Log every 10 minutes so you can verify timezone
-    if (est.getMinutes() % 10 === 0) {
-        console.log(`🕐 EST Check: ${est.toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} | Hour: ${est.getHours()}`);
+    // Log every 10 minutes
+    if (now.getMinutes() % 10 === 0) {
+        console.log(`🕐 EST Time: ${estTime} | Hour: ${estHour}`);
     }
 
-    if (est.getHours() === 9 && lastMorningRun !== today) {
+    if (estHour === 9 && lastMorningRun !== today) {
         console.log('🌅 9am EST - Triggering morning follow-up');
         lastMorningRun = today;
 
