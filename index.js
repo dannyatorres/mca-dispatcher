@@ -55,6 +55,9 @@ async function runDispatcher() {
                     OR
                     -- DEAD: Ignored Hail Mary for 75 mins
                     (c.state = 'HAIL_MARY' AND last_msg.timestamp < NOW() - INTERVAL '75 minutes')
+                    OR
+                    -- Vetter takes over immediately after pre-vetting
+                    (c.state = 'PRE_VETTED')
                 )
             LIMIT $1
         `;
@@ -101,6 +104,12 @@ async function runDispatcher() {
                 console.log(`💀 [${lead.business_name}] Ignored ballpark → DEAD`);
                 shouldTriggerAI = false;
                 nextState = 'DEAD';
+            }
+
+            else if (lead.state === 'PRE_VETTED') {
+                console.log(`🔍 [${lead.business_name}] PRE_VETTED → Vetter`);
+                instruction = "";
+                nextState = 'VETTING';
             }
 
             try {
