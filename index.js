@@ -45,7 +45,7 @@ async function runDispatcher() {
                     -- 🟢 WARM VETTING (RAPID FIRE)
                     OR
                     -- STRIKE 1: Stalled for 15 mins
-                    (c.state = 'INTERESTED' AND last_msg.timestamp < NOW() - INTERVAL '15 minutes')
+                    (c.state = 'REPLIED' AND last_msg.timestamp < NOW() - INTERVAL '15 minutes')
                     OR
                     -- STRIKE 2: Ignored Nudge 1 for 30 mins (Total 45m)
                     (c.state = 'VETTING_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
@@ -82,7 +82,7 @@ async function runDispatcher() {
 
             // --- 🟢 WARM VETTING (RAPID FIRE) ---
             
-            else if (lead.state === 'INTERESTED') {
+            else if (lead.state === 'REPLIED') {
                 // 15 Mins later
                 console.log(`🤔 Lead ${lead.business_name} stalled (15m). Sending Nudge 1.`);
                 instruction = "The user stopped responding. Read history. Gently nudge them about the last question (Credit or Funding). Keep it very short.";
