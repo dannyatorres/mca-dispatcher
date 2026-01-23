@@ -28,7 +28,7 @@ async function runDispatcher() {
                 SELECT direction, timestamp FROM messages m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
             WHERE
-                c.state NOT IN ('DEAD', 'ARCHIVED', 'FUNDED', 'FCS_QUEUE', 'STALE') 
+                c.state NOT IN ('DEAD', 'ARCHIVED', 'FUNDED', 'FCS_QUEUE') 
                 AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
                 AND (
                     -- COLD DRIP (Existing)
@@ -102,9 +102,9 @@ async function runDispatcher() {
             
             } else if (lead.state === 'SENT_BALLPARK') {
                 // 75 Mins after Offer -> DEAD
-                console.log(`💀 Lead ${lead.business_name} ignored the money. Marking STALE.`);
+                console.log(`💀 Lead ${lead.business_name} ignored the money. Marking DEAD.`);
                 shouldTriggerAI = false;
-                nextState = 'STALE';
+                nextState = 'DEAD';
             }
 
             try {
