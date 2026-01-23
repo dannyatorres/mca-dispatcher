@@ -28,36 +28,33 @@ async function runDispatcher() {
                 SELECT direction, timestamp FROM messages m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
             WHERE
-                c.state NOT IN ('DEAD', 'ARCHIVED', 'FUNDED', 'FCS_QUEUE') 
-                AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
+                c.state NOT IN ('DEAD', 'ARCHIVED', 'FUNDED', 'FCS_QUEUE')
                 AND (
-                    -- COLD DRIP (Existing)
-                    (c.state = 'NEW' AND c.created_at < NOW() - INTERVAL '2 minutes')
-                    OR
-                    (c.state = 'SENT_HOOK' AND last_msg.timestamp < NOW() - INTERVAL '20 minutes')
-                    OR
-                    (c.state = 'SENT_FU_1' AND last_msg.timestamp < NOW() - INTERVAL '20 minutes')
-                    OR
-                    (c.state = 'SENT_FU_2' AND last_msg.timestamp < NOW() - INTERVAL '4 hours')
-                    OR
-                    (c.state = 'SENT_FU_3' AND last_msg.timestamp < NOW() - INTERVAL '24 hours')
-
-                    -- 🟢 REPLIED NUDGES (gathering info)
-                    OR
-                    -- Nudge 1: Stalled for 15 mins
-                    (c.state = 'REPLIED' AND last_msg.timestamp < NOW() - INTERVAL '15 minutes')
-                    OR
-                    -- Nudge 2: Ignored Nudge 1 for 30 mins
-                    (c.state = 'REPLIED_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
-                    OR
-                    -- HAIL MARY: Ignored Nudge 2 for 60 mins
-                    (c.state = 'REPLIED_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
-                    OR
-                    -- DEAD: Ignored Hail Mary for 75 mins
-                    (c.state = 'HAIL_MARY' AND last_msg.timestamp < NOW() - INTERVAL '75 minutes')
-                    OR
-                    -- Vetter takes over immediately after pre-vetting
+                    -- PRE_VETTED: Always trigger (Vetter reads convo and decides)
                     (c.state = 'PRE_VETTED')
+                    OR
+                    (
+                        (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
+                        AND (
+                            (c.state = 'NEW' AND c.created_at < NOW() - INTERVAL '2 minutes')
+                            OR
+                            (c.state = 'SENT_HOOK' AND last_msg.timestamp < NOW() - INTERVAL '20 minutes')
+                            OR
+                            (c.state = 'SENT_FU_1' AND last_msg.timestamp < NOW() - INTERVAL '20 minutes')
+                            OR
+                            (c.state = 'SENT_FU_2' AND last_msg.timestamp < NOW() - INTERVAL '4 hours')
+                            OR
+                            (c.state = 'SENT_FU_3' AND last_msg.timestamp < NOW() - INTERVAL '24 hours')
+                            OR
+                            (c.state = 'REPLIED' AND last_msg.timestamp < NOW() - INTERVAL '15 minutes')
+                            OR
+                            (c.state = 'REPLIED_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
+                            OR
+                            (c.state = 'REPLIED_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
+                            OR
+                            (c.state = 'HAIL_MARY' AND last_msg.timestamp < NOW() - INTERVAL '75 minutes')
+                        )
+                    )
                 )
             LIMIT $1
         `;
