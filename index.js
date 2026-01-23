@@ -83,21 +83,18 @@ async function runDispatcher() {
             // --- 🟢 WARM VETTING (RAPID FIRE) ---
             
             else if (lead.state === 'REPLIED') {
-                // 15 Mins later
                 console.log(`🤔 Lead ${lead.business_name} stalled (15m). Sending Nudge 1.`);
-                instruction = "The user stopped responding. Read history. Gently nudge them about the last question (Credit or Funding). Keep it very short.";
+                instruction = "NUDGE";
                 nextState = 'VETTING_NUDGE_1';
 
             } else if (lead.state === 'VETTING_NUDGE_1') {
-                // 30 Mins after Nudge 1
-                console.log(`🤔 Lead ${lead.business_name} ignored nudge. Sending Final Warning.`);
-                instruction = "User hasn't replied. Ask: 'Hey, I haven't heard back—should I assume you're all set or should I keep this file open?'";
+                console.log(`🤔 Lead ${lead.business_name} ignored nudge. Sending Nudge 2.`);
+                instruction = "NUDGE";
                 nextState = 'VETTING_NUDGE_2';
 
             } else if (lead.state === 'VETTING_NUDGE_2') {
-                // 60 Mins after Nudge 2 -> HAIL MARY
                 console.log(`🏈 HAIL MARY: Sending Ballpark Offer to ${lead.business_name}`);
-                instruction = "Generate Ballpark Offer"; // Triggers Gemini logic in aiAgent.js
+                instruction = "Generate Ballpark Offer";
                 nextState = 'SENT_BALLPARK';
             
             } else if (lead.state === 'SENT_BALLPARK') {
