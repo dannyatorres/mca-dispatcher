@@ -42,19 +42,19 @@ async function runDispatcher() {
                     OR
                     (c.state = 'SENT_FU_3' AND last_msg.timestamp < NOW() - INTERVAL '24 hours')
 
-                    -- 🟢 WARM VETTING (RAPID FIRE)
+                    -- 🟢 REPLIED NUDGES (gathering info)
                     OR
-                    -- STRIKE 1: Stalled for 15 mins
+                    -- Nudge 1: Stalled for 15 mins
                     (c.state = 'REPLIED' AND last_msg.timestamp < NOW() - INTERVAL '15 minutes')
                     OR
-                    -- STRIKE 2: Ignored Nudge 1 for 30 mins (Total 45m)
-                    (c.state = 'VETTING_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
+                    -- Nudge 2: Ignored Nudge 1 for 30 mins
+                    (c.state = 'REPLIED_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
                     OR
-                    -- STRIKE 3 (HAIL MARY): Ignored Nudge 2 for 60 mins
-                    (c.state = 'VETTING_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
+                    -- HAIL MARY: Ignored Nudge 2 for 60 mins
+                    (c.state = 'REPLIED_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
                     OR
-                    -- STRIKE 4 (GIVE UP): Ignored Hail Mary for 75 mins
-                    (c.state = 'SENT_BALLPARK' AND last_msg.timestamp < NOW() - INTERVAL '75 minutes')
+                    -- DEAD: Ignored Hail Mary for 75 mins
+                    (c.state = 'HAIL_MARY' AND last_msg.timestamp < NOW() - INTERVAL '75 minutes')
                 )
             LIMIT $1
         `;
@@ -80,26 +80,25 @@ async function runDispatcher() {
                 instruction = "Send exactly: 'hey any response would be appreciated here, close this out?'"; nextState = 'SENT_FU_4'; // or STALE
             }
 
-            // --- 🟢 WARM VETTING (RAPID FIRE) ---
-            
+            // --- 🟢 REPLIED NUDGES (Pre-Vetter still gathering info) ---
+
             else if (lead.state === 'REPLIED') {
-                console.log(`🤔 Lead ${lead.business_name} stalled (15m). Sending Nudge 1.`);
-                instruction = "NUDGE";
-                nextState = 'VETTING_NUDGE_1';
+                console.log(`🤔 [${lead.business_name}] Stalled 15m → Nudge 1`);
+                instruction = "";
+                nextState = 'REPLIED_NUDGE_1';
 
-            } else if (lead.state === 'VETTING_NUDGE_1') {
-                console.log(`🤔 Lead ${lead.business_name} ignored nudge. Sending Nudge 2.`);
-                instruction = "NUDGE";
-                nextState = 'VETTING_NUDGE_2';
+            } else if (lead.state === 'REPLIED_NUDGE_1') {
+                console.log(`🤔 [${lead.business_name}] Ignored nudge → Nudge 2`);
+                instruction = "";
+                nextState = 'REPLIED_NUDGE_2';
 
-            } else if (lead.state === 'VETTING_NUDGE_2') {
-                console.log(`🏈 HAIL MARY: Sending Ballpark Offer to ${lead.business_name}`);
-                instruction = "Generate Ballpark Offer";
-                nextState = 'SENT_BALLPARK';
-            
-            } else if (lead.state === 'SENT_BALLPARK') {
-                // 75 Mins after Offer -> DEAD
-                console.log(`💀 Lead ${lead.business_name} ignored the money. Marking DEAD.`);
+            } else if (lead.state === 'REPLIED_NUDGE_2') {
+                console.log(`🏈 [${lead.business_name}] HAIL MARY → Vetter throws ballpark`);
+                instruction = "";
+                nextState = 'HAIL_MARY';
+
+            } else if (lead.state === 'HAIL_MARY') {
+                console.log(`💀 [${lead.business_name}] Ignored ballpark → DEAD`);
                 shouldTriggerAI = false;
                 nextState = 'DEAD';
             }
