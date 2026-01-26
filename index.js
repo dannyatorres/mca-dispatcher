@@ -65,6 +65,12 @@ async function runDispatcher() {
                             (c.state = 'REPLIED_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
                             OR
                             (c.state = 'HAIL_MARY' AND last_msg.timestamp < NOW() - INTERVAL '75 minutes')
+                            OR
+                            (c.state = 'VETTING' AND last_msg.timestamp < NOW() - INTERVAL '15 minutes')
+                            OR
+                            (c.state = 'VETTING_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
+                            OR
+                            (c.state = 'VETTING_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
                         )
                     )
                 )
@@ -128,6 +134,21 @@ async function runDispatcher() {
             } else if (lead.state === 'HAIL_MARY') {
                 console.log(`💀 [${lead.business_name}] Ignored ballpark → DEAD`);
                 shouldTriggerAI = false;
+                nextState = 'DEAD';
+            }
+
+            // --- 🔵 VETTING NUDGES (Vetter pitching) ---
+
+            else if (lead.state === 'VETTING') {
+                instruction = "NUDGE: They went quiet after your pitch. Follow up on the offer.";
+                nextState = 'VETTING_NUDGE_1';
+
+            } else if (lead.state === 'VETTING_NUDGE_1') {
+                instruction = "NUDGE 2: Still no response. Ask if the numbers work or if they need something different.";
+                nextState = 'VETTING_NUDGE_2';
+
+            } else if (lead.state === 'VETTING_NUDGE_2') {
+                instruction = "FINAL NUDGE: Last chance - ask if you should close the file.";
                 nextState = 'DEAD';
             }
 
