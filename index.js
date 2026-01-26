@@ -72,8 +72,27 @@ async function runDispatcher() {
 
             // --- COLD DRIP LOGIC (Keep as is) ---
             if (lead.state === 'NEW') {
-                instruction = lead.campaign_hook || "Underwriter Hook";
+                // Build direct message - no AI needed
+                const hook = lead.campaign_hook || "Hi {{first_name}}, my name is {{AGENT_NAME}} im one of the underwriters at JMS Global. I'm currently going over the bank statements and the application you sent in and I wanted to make an offer. What's the best email to send the offer to?";
+
+                const firstName = (lead.lead_name || 'there').split(' ')[0];
+                const agentName = lead.agent_name || 'Dan Torres';
+
+                const directMessage = hook
+                    .replace(/\{\{first_name\}\}/gi, firstName)
+                    .replace(/\{\{AGENT_NAME\}\}/gi, agentName);
+
+                instruction = null;
                 nextState = 'SENT_HOOK';
+
+                // Send direct - skip AI
+                await axios.post(BACKEND_URL, {
+                    conversation_id: lead.id,
+                    direct_message: directMessage
+                });
+                await client.query(`UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2`, [nextState, lead.id]);
+                await new Promise(r => setTimeout(r, 2000));
+                continue; // Skip the normal trigger below
             } else if (lead.state === 'SENT_HOOK') {
                 instruction = "Send exactly: 'Did you get funded already?'"; nextState = 'SENT_FU_1';
             } else if (lead.state === 'SENT_FU_1') {
