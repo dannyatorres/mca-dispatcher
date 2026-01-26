@@ -26,7 +26,7 @@ async function runDispatcher() {
                    u.service_settings->>'campaign_hook' AS campaign_hook,
             EXTRACT(EPOCH FROM (NOW() - COALESCE(last_msg.timestamp, c.created_at)))/60 as minutes_since_last
             FROM conversations c
-            JOIN users u ON c.user_id = u.id
+            JOIN users u ON c.assigned_user_id = u.id
             LEFT JOIN LATERAL (
                 SELECT direction, timestamp FROM messages m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
