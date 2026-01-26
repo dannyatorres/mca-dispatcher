@@ -114,18 +114,15 @@ async function runDispatcher() {
             // --- 🟢 REPLIED NUDGES (Pre-Vetter still gathering info) ---
 
             else if (lead.state === 'REPLIED') {
-                console.log(`🤔 [${lead.business_name}] Stalled 15m → Nudge 1`);
-                instruction = "";
+                instruction = "NUDGE: They went quiet. Follow up on your last unanswered question.";
                 nextState = 'REPLIED_NUDGE_1';
 
             } else if (lead.state === 'REPLIED_NUDGE_1') {
-                console.log(`🤔 [${lead.business_name}] Ignored nudge → Nudge 2`);
-                instruction = "";
+                instruction = "NUDGE 2: Still no response. Send a short 'you there?' type message.";
                 nextState = 'REPLIED_NUDGE_2';
 
             } else if (lead.state === 'REPLIED_NUDGE_2') {
-                console.log(`🏈 [${lead.business_name}] HAIL MARY → Vetter throws ballpark`);
-                instruction = "";
+                instruction = "FINAL NUDGE: Last chance - ask if you should close the file.";
                 nextState = 'HAIL_MARY';
 
             } else if (lead.state === 'HAIL_MARY') {
