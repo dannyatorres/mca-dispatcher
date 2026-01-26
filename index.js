@@ -114,7 +114,8 @@ async function runDispatcher() {
             } else if (lead.state === 'SENT_FU_2') {
                 instruction = "Send exactly: 'Hey just following up again, should i close the file out?'"; nextState = 'SENT_FU_3';
             } else if (lead.state === 'SENT_FU_3') {
-                instruction = "Send exactly: 'hey any response would be appreciated here, close this out?'"; nextState = 'SENT_FU_4'; // or STALE
+                instruction = "Send exactly: 'hey any response would be appreciated here, close this out?'";
+                nextState = 'DEAD';
             }
 
             // --- 🟢 REPLIED NUDGES (Pre-Vetter still gathering info) ---
@@ -153,7 +154,17 @@ async function runDispatcher() {
             }
 
             else if (lead.state === 'PRE_VETTED') {
-                console.log(`🔍 [${lead.business_name}] PRE_VETTED → Vetter`);
+                const strategyCheck = await client.query(
+                    `SELECT 1 FROM lead_strategy WHERE conversation_id = $1`,
+                    [lead.id]
+                );
+
+                if (strategyCheck.rows.length === 0) {
+                    console.log(`⏳ [${lead.business_name}] PRE_VETTED - waiting for strategy`);
+                    continue;
+                }
+
+                console.log(`🔍 [${lead.business_name}] PRE_VETTED → VETTING`);
                 instruction = "";
                 nextState = 'VETTING';
             }
