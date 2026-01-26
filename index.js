@@ -13,6 +13,15 @@ if (!DATABASE_URL) { console.error("❌ ERROR: DATABASE_URL is missing."); proce
 
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
+function formatName(name) {
+    if (!name) return '';
+    return name
+        .toLowerCase()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
 async function runDispatcher() {
     console.log('⏰ Starting Dispatcher Run:', new Date().toISOString());
     let client;
@@ -75,24 +84,23 @@ async function runDispatcher() {
                 // Build direct message - no AI needed
                 const hook = lead.campaign_hook || "Hi {{first_name}}, my name is {{AGENT_NAME}} im one of the underwriters at JMS Global. I'm currently going over the bank statements and the application you sent in and I wanted to make an offer. What's the best email to send the offer to?";
 
-                const firstName = lead.first_name || 'there';
+                const firstName = formatName(lead.first_name) || 'there';
                 const agentName = lead.agent_name || 'Dan Torres';
 
                 const directMessage = hook
                     .replace(/\{\{first_name\}\}/gi, firstName)
                     .replace(/\{\{AGENT_NAME\}\}/gi, agentName);
 
-                instruction = null;
-                nextState = 'SENT_HOOK';
+                // Update state FIRST to prevent duplicate pickup
+                await client.query(`UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2`, ['SENT_HOOK', lead.id]);
 
-                // Send direct - skip AI
+                // Then send the message
                 await axios.post(BACKEND_URL, {
                     conversation_id: lead.id,
                     direct_message: directMessage
                 });
-                await client.query(`UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2`, [nextState, lead.id]);
                 await new Promise(r => setTimeout(r, 2000));
-                continue; // Skip the normal trigger below
+                continue;
             } else if (lead.state === 'SENT_HOOK') {
                 instruction = "Send exactly: 'Did you get funded already?'"; nextState = 'SENT_FU_1';
             } else if (lead.state === 'SENT_FU_1') {
