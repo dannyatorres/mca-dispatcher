@@ -21,7 +21,8 @@ async function runDispatcher() {
         client = await pool.connect();
 
         const query = `
-            SELECT c.id, c.lead_phone, c.state, c.business_name,
+            SELECT c.id, c.lead_phone, c.state, c.business_name, c.lead_name,
+                   u.agent_name,
                    u.service_settings->>'campaign_hook' AS campaign_hook,
             EXTRACT(EPOCH FROM (NOW() - COALESCE(last_msg.timestamp, c.created_at)))/60 as minutes_since_last
             FROM conversations c
