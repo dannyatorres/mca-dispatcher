@@ -22,8 +22,10 @@ async function runDispatcher() {
 
         const query = `
             SELECT c.id, c.lead_phone, c.state, c.business_name,
+                   u.service_settings->>'campaign_hook' AS campaign_hook,
             EXTRACT(EPOCH FROM (NOW() - COALESCE(last_msg.timestamp, c.created_at)))/60 as minutes_since_last
             FROM conversations c
+            JOIN users u ON c.user_id = u.id
             LEFT JOIN LATERAL (
                 SELECT direction, timestamp FROM messages m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
@@ -69,7 +71,8 @@ async function runDispatcher() {
 
             // --- COLD DRIP LOGIC (Keep as is) ---
             if (lead.state === 'NEW') {
-                instruction = "Underwriter Hook"; nextState = 'SENT_HOOK';
+                instruction = lead.campaign_hook || "Underwriter Hook";
+                nextState = 'SENT_HOOK';
             } else if (lead.state === 'SENT_HOOK') {
                 instruction = "Send exactly: 'Did you get funded already?'"; nextState = 'SENT_FU_1';
             } else if (lead.state === 'SENT_FU_1') {
