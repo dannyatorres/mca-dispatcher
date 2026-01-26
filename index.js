@@ -71,6 +71,8 @@ async function runDispatcher() {
                             (c.state = 'VETTING_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
                             OR
                             (c.state = 'VETTING_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
+                            OR
+                            (c.state = 'HAIL_MARY_FINAL' AND last_msg.timestamp < NOW() - INTERVAL '24 hours')
                         )
                     )
                 )
@@ -134,6 +136,12 @@ async function runDispatcher() {
 
             } else if (lead.state === 'HAIL_MARY') {
                 console.log(`💀 [${lead.business_name}] Ignored ballpark → DEAD`);
+                shouldTriggerAI = false;
+                nextState = 'DEAD';
+            }
+
+            else if (lead.state === 'HAIL_MARY_FINAL') {
+                console.log(`💀 [${lead.business_name}] No response after morning follow-up → DEAD`);
                 shouldTriggerAI = false;
                 nextState = 'DEAD';
             }
