@@ -21,7 +21,7 @@ async function runDispatcher() {
         client = await pool.connect();
 
         const query = `
-            SELECT c.id, c.lead_phone, c.state, c.business_name, c.lead_name,
+            SELECT c.id, c.lead_phone, c.state, c.business_name, c.first_name,
                    u.agent_name,
                    u.service_settings->>'campaign_hook' AS campaign_hook,
             EXTRACT(EPOCH FROM (NOW() - COALESCE(last_msg.timestamp, c.created_at)))/60 as minutes_since_last
@@ -75,7 +75,7 @@ async function runDispatcher() {
                 // Build direct message - no AI needed
                 const hook = lead.campaign_hook || "Hi {{first_name}}, my name is {{AGENT_NAME}} im one of the underwriters at JMS Global. I'm currently going over the bank statements and the application you sent in and I wanted to make an offer. What's the best email to send the offer to?";
 
-                const firstName = (lead.lead_name || 'there').split(' ')[0];
+                const firstName = lead.first_name || 'there';
                 const agentName = lead.agent_name || 'Dan Torres';
 
                 const directMessage = hook
