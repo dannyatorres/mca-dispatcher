@@ -188,12 +188,16 @@ async function runDispatcher() {
             }
 
             try {
+                // Update state FIRST to prevent duplicate pickup
+                await client.query(`UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2`, [nextState, lead.id]);
+
                 if (shouldTriggerAI) {
                     await axios.post(BACKEND_URL, { conversation_id: lead.id, system_instruction: instruction });
                 }
-                await client.query(`UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2`, [nextState, lead.id]);
-                await new Promise(r => setTimeout(r, 2000)); 
-            } catch (err) { console.error(err.message); }
+                await new Promise(r => setTimeout(r, 2000));
+            } catch (err) {
+                console.error(`❌ [${lead.business_name}] Error:`, err.message);
+            }
         }
 
     } catch (err) {
