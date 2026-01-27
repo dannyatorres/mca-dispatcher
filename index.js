@@ -53,6 +53,9 @@ async function runDispatcher() {
                     -- PRE_VETTED: Always trigger (Vetter reads convo and decides)
                     (c.state = 'PRE_VETTED')
                     OR
+                    -- Customer just replied and we haven't responded yet
+                    (c.state = 'REPLIED' AND last_msg.direction = 'inbound' AND last_msg.timestamp < NOW() - INTERVAL '2 minutes')
+                    OR
                     (
                         (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
                         AND (
