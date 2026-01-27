@@ -25,6 +25,19 @@ function formatName(name) {
 let isRunning = false;
 
 async function runDispatcher() {
+    // Check business hours (8am - 10pm EST)
+    const now = new Date();
+    const estHour = parseInt(now.toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        hour: 'numeric',
+        hour12: false
+    }));
+
+    if (estHour < 8 || estHour >= 22) {
+        console.log(`😴 Outside business hours (${estHour}:00 EST) - sleeping`);
+        return;
+    }
+
     if (isRunning) {
         console.log('⏭️ Previous run still active - skipping');
         return;
