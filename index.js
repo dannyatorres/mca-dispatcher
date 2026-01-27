@@ -80,6 +80,7 @@ async function runDispatcher() {
         `;
 
         const { rows } = await client.query(query, [BATCH_SIZE]);
+        console.log(`📊 Found ${rows.length} leads to process`);
         if (rows.length === 0) { console.log('✅ No leads need attention.'); return; }
 
         for (const lead of rows) {
