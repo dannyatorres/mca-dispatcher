@@ -22,8 +22,16 @@ function formatName(name) {
         .join(' ');
 }
 
+let isRunning = false;
+
 async function runDispatcher() {
-    console.log('🚀 DISPATCHER v2.1 - ' + new Date().toISOString());
+    if (isRunning) {
+        console.log('⏭️ Previous run still active - skipping');
+        return;
+    }
+    isRunning = true;
+
+    console.log('🚀 DISPATCHER v2.1 -', new Date().toISOString());
     let client;
 
     try {
@@ -84,6 +92,7 @@ async function runDispatcher() {
         if (rows.length === 0) { console.log('✅ No leads need attention.'); return; }
 
         for (const lead of rows) {
+            console.log(`➡️ Processing: ${lead.business_name} [${lead.state}]`);
             let instruction = "";
             let nextState = "";
             let shouldTriggerAI = true;
@@ -187,8 +196,12 @@ async function runDispatcher() {
             } catch (err) { console.error(err.message); }
         }
 
-    } catch (err) { console.error('🔥 Critical Error:', err); } 
-    finally { if (client) client.release(); }
+    } catch (err) {
+        console.error('🔥 Critical Error:', err);
+    } finally {
+        isRunning = false;
+        if (client) client.release();
+    }
 }
 
 runDispatcher();
