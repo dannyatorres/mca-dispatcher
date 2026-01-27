@@ -41,6 +41,7 @@ async function runDispatcher() {
             SELECT c.id, c.lead_phone, c.state, c.business_name, c.first_name,
                    u.agent_name,
                    u.service_settings->>'campaign_hook' AS campaign_hook,
+                   last_msg.direction AS last_msg_direction,
             EXTRACT(EPOCH FROM (NOW() - COALESCE(last_msg.timestamp, c.created_at)))/60 as minutes_since_last
             FROM conversations c
             JOIN users u ON c.assigned_user_id = u.id
@@ -133,11 +134,19 @@ async function runDispatcher() {
                 nextState = 'DEAD';
             }
 
-            // --- 🟢 REPLIED NUDGES (Pre-Vetter still gathering info) ---
+            // --- 🟢 REPLIED HANDLING ---
 
             else if (lead.state === 'REPLIED') {
-                instruction = "NUDGE: They went quiet. Follow up on your last unanswered question.";
-                nextState = 'REPLIED_NUDGE_1';
+                // Check if customer just replied (inbound) vs went quiet (outbound)
+                if (lead.last_msg_direction === 'inbound') {
+                    // Customer answered - AI should respond naturally
+                    instruction = "The lead just replied. Read the conversation and respond appropriately.";
+                    nextState = 'REPLIED'; // Stay in REPLIED until qualified or dead
+                } else {
+                    // Customer went quiet - nudge them
+                    instruction = "NUDGE: They went quiet. Follow up on your last unanswered question.";
+                    nextState = 'REPLIED_NUDGE_1';
+                }
 
             } else if (lead.state === 'REPLIED_NUDGE_1') {
                 instruction = "NUDGE 2: Still no response. Send a short 'you there?' type message.";
