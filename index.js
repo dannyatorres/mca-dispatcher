@@ -126,8 +126,15 @@ async function runDispatcher() {
                     .replace(/\{\{first_name\}\}/gi, firstName)
                     .replace(/\{\{AGENT_NAME\}\}/gi, agentName);
 
-                // Update state FIRST to prevent duplicate pickup
-                await client.query(`UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2`, ['SENT_HOOK', lead.id]);
+                // Track state change + update
+                await client.query(`
+                    INSERT INTO state_history (conversation_id, old_state, new_state, changed_by)
+                    VALUES ($1, $2, $3, 'dispatcher')
+                `, [lead.id, 'NEW', 'SENT_HOOK']);
+
+                await client.query(`
+                    UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2
+                `, ['SENT_HOOK', lead.id]);
 
                 // Then send the message
                 await axios.post(BACKEND_URL, {
@@ -213,8 +220,17 @@ async function runDispatcher() {
             }
 
             try {
-                // Update state FIRST to prevent duplicate pickup
-                await client.query(`UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2`, [nextState, lead.id]);
+                // Track state change + update
+                if (nextState && nextState !== lead.state) {
+                    await client.query(`
+                        INSERT INTO state_history (conversation_id, old_state, new_state, changed_by)
+                        VALUES ($1, $2, $3, 'dispatcher')
+                    `, [lead.id, lead.state, nextState]);
+                }
+
+                await client.query(`
+                    UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2
+                `, [nextState, lead.id]);
 
                 if (shouldTriggerAI) {
                     await axios.post(BACKEND_URL, { conversation_id: lead.id, system_instruction: instruction });
