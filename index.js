@@ -23,7 +23,7 @@ function formatName(name) {
 }
 
 async function runDispatcher() {
-    console.log('⏰ Starting Dispatcher Run:', new Date().toISOString());
+    console.log('🚀 DISPATCHER v2.1 - ' + new Date().toISOString());
     let client;
 
     try {
