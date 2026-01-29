@@ -221,13 +221,7 @@ async function runDispatcher() {
                         next_state: nextState !== lead.state ? nextState : null
                     });
                 } else if (nextState && nextState !== lead.state) {
-                    await client.query(`
-                        INSERT INTO state_history (conversation_id, old_state, new_state, changed_by)
-                        VALUES ($1, $2, $3, 'dispatcher')
-                    `, [lead.id, lead.state, nextState]);
-                    await client.query(`
-                        UPDATE conversations SET state = $1, last_activity = NOW() WHERE id = $2
-                    `, [nextState, lead.id]);
+                    await updateState(lead.id, nextState, 'drip');
                 }
                 await new Promise(r => setTimeout(r, 2000));
             } catch (err) {
