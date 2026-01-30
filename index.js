@@ -52,55 +52,34 @@ async function runDispatcher() {
 
         const query = `
             SELECT c.id, c.lead_phone, c.state, c.business_name, c.first_name,
-                   u.agent_name,
+                   c.nudge_count, u.agent_name,
                    u.service_settings->>'campaign_hook' AS campaign_hook,
-                   last_msg.direction AS last_msg_direction,
-            EXTRACT(EPOCH FROM (NOW() - COALESCE(last_msg.timestamp, c.created_at)))/60 as minutes_since_last
+                   last_msg.direction AS last_direction,
+                   EXTRACT(EPOCH FROM (NOW() - c.last_activity_at))/60 as minutes_idle
             FROM conversations c
             JOIN users u ON c.assigned_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT direction, timestamp FROM messages m WHERE m.conversation_id = c.id ORDER BY m.timestamp DESC LIMIT 1
+                SELECT direction FROM messages m
+                WHERE m.conversation_id = c.id
+                ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
-            WHERE
-                c.state NOT IN ('DEAD', 'ARCHIVED', 'FUNDED', 'FCS_QUEUE')
-                AND (
-                    -- PRE_VETTED: Always trigger (Vetter reads convo and decides)
-                    (c.state = 'PRE_VETTED')
-                    OR
-                    -- Customer just replied and we haven't responded yet
-                    (c.state = 'REPLIED' AND last_msg.direction = 'inbound' AND last_msg.timestamp < NOW() - INTERVAL '2 minutes')
-                    OR
-                    (
-                        (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
-                        AND (
-                            (c.state = 'NEW' AND c.created_at < NOW() - INTERVAL '2 minutes')
-                            OR
-                            (c.state = 'SENT_HOOK' AND last_msg.timestamp < NOW() - INTERVAL '20 minutes')
-                            OR
-                            (c.state = 'SENT_FU_1' AND last_msg.timestamp < NOW() - INTERVAL '20 minutes')
-                            OR
-                            (c.state = 'SENT_FU_2' AND last_msg.timestamp < NOW() - INTERVAL '4 hours')
-                            OR
-                            (c.state = 'SENT_FU_3' AND last_msg.timestamp < NOW() - INTERVAL '24 hours')
-                            OR
-                            (c.state = 'REPLIED' AND last_msg.timestamp < NOW() - INTERVAL '15 minutes')
-                            OR
-                            (c.state = 'REPLIED_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
-                            OR
-                            (c.state = 'REPLIED_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
-                            OR
-                            (c.state = 'HAIL_MARY' AND last_msg.timestamp < NOW() - INTERVAL '75 minutes')
-                            OR
-                            (c.state = 'VETTING' AND last_msg.timestamp < NOW() - INTERVAL '15 minutes')
-                            OR
-                            (c.state = 'VETTING_NUDGE_1' AND last_msg.timestamp < NOW() - INTERVAL '30 minutes')
-                            OR
-                            (c.state = 'VETTING_NUDGE_2' AND last_msg.timestamp < NOW() - INTERVAL '60 minutes')
-                            OR
-                            (c.state = 'HAIL_MARY_FINAL' AND last_msg.timestamp < NOW() - INTERVAL '24 hours')
-                        )
-                    )
-                )
+            WHERE c.state NOT IN ('DEAD', 'FUNDED', 'SUBMITTED', 'ARCHIVED')
+              AND c.ai_enabled != false
+              AND (
+                  (c.state = 'NEW' AND c.created_at < NOW() - INTERVAL '2 minutes')
+                  OR
+                  (c.state = 'DRIP' AND c.nudge_count < 4
+                   AND c.last_activity_at < NOW() - INTERVAL '1 hour' * POWER(2, c.nudge_count))
+                  OR
+                  (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
+                   AND last_msg.direction = 'inbound'
+                   AND c.last_activity_at < NOW() - INTERVAL '2 minutes')
+                  OR
+                  (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
+                   AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
+                   AND c.nudge_count < 3
+                   AND c.last_activity_at < NOW() - INTERVAL '15 minutes' * POWER(2, c.nudge_count))
+              )
             LIMIT $1
         `;
 
@@ -109,120 +88,34 @@ async function runDispatcher() {
         if (rows.length === 0) { console.log('✅ No leads need attention.'); return; }
 
         for (const lead of rows) {
-            console.log(`➡️ Processing: ${lead.business_name} [${lead.state}]`);
-            let instruction = "";
-            let nextState = "";
-            let shouldTriggerAI = true;
+            console.log(`➡️ Processing: ${lead.business_name} [${lead.state}] nudge:${lead.nudge_count}`);
 
-            // --- COLD DRIP LOGIC (Keep as is) ---
-            if (lead.state === 'NEW') {
-                // Build direct message - no AI needed
-                const hook = lead.campaign_hook || "Hi {{first_name}}, my name is {{AGENT_NAME}} im one of the underwriters at JMS Global. I'm currently going over the bank statements and the application you sent in and I wanted to make an offer. What's the best email to send the offer to?";
+            try {
+                if (lead.state === 'NEW') {
+                    // Send hook directly, no AI needed
+                    const hook = lead.campaign_hook || "Hi {{first_name}}, my name is {{AGENT_NAME}}...";
+                    const firstName = formatName(lead.first_name) || 'there';
+                    const agentName = lead.agent_name || 'Dan Torres';
+                    const directMessage = hook
+                        .replace(/\{\{first_name\}\}/gi, firstName)
+                        .replace(/\{\{AGENT_NAME\}\}/gi, agentName);
 
-                const firstName = formatName(lead.first_name) || 'there';
-                const agentName = lead.agent_name || 'Dan Torres';
-
-                const directMessage = hook
-                    .replace(/\{\{first_name\}\}/gi, firstName)
-                    .replace(/\{\{AGENT_NAME\}\}/gi, agentName);
-
-                try {
                     await axios.post(BACKEND_URL, {
                         conversation_id: lead.id,
                         direct_message: directMessage,
-                        next_state: 'SENT_HOOK'
+                        next_state: 'DRIP'
                     });
-                } catch (err) {
-                    console.error(`❌ [${lead.business_name}] API call failed:`, err.message);
-                }
-                await new Promise(r => setTimeout(r, 2000));
-                continue;
-            } else if (lead.state === 'SENT_HOOK') {
-                instruction = "Send exactly: 'Did you get funded already?'"; nextState = 'SENT_FU_1';
-            } else if (lead.state === 'SENT_FU_1') {
-                instruction = "Send exactly: 'The money is expensive as is let me compete.'"; nextState = 'SENT_FU_2';
-            } else if (lead.state === 'SENT_FU_2') {
-                instruction = "Send exactly: 'Hey just following up again, should i close the file out?'"; nextState = 'SENT_FU_3';
-            } else if (lead.state === 'SENT_FU_3') {
-                instruction = "Send exactly: 'hey any response would be appreciated here, close this out?'";
-                nextState = 'DEAD';
-            }
-
-            // --- 🟢 REPLIED HANDLING ---
-
-            else if (lead.state === 'REPLIED') {
-                // Check if customer just replied (inbound) vs went quiet (outbound)
-                if (lead.last_msg_direction === 'inbound') {
-                    // Customer answered - AI should respond naturally
-                    instruction = "The lead just replied. Read the conversation and respond appropriately.";
-                    nextState = 'REPLIED'; // Stay in REPLIED until qualified or dead
                 } else {
-                    // Customer went quiet - nudge them
-                    instruction = "NUDGE: They went quiet. Follow up on your last unanswered question.";
-                    nextState = 'REPLIED_NUDGE_1';
-                }
+                    // All other states: let AI decide
+                    const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
 
-            } else if (lead.state === 'REPLIED_NUDGE_1') {
-                instruction = "NUDGE 2: Still no response. Send a short 'you there?' type message.";
-                nextState = 'REPLIED_NUDGE_2';
-
-            } else if (lead.state === 'REPLIED_NUDGE_2') {
-                instruction = "FINAL NUDGE: Last chance - ask if you should close the file.";
-                nextState = 'HAIL_MARY';
-
-            } else if (lead.state === 'HAIL_MARY') {
-                console.log(`💀 [${lead.business_name}] Ignored ballpark → DEAD`);
-                shouldTriggerAI = false;
-                nextState = 'DEAD';
-            }
-
-            else if (lead.state === 'HAIL_MARY_FINAL') {
-                console.log(`💀 [${lead.business_name}] No response after morning follow-up → DEAD`);
-                shouldTriggerAI = false;
-                nextState = 'DEAD';
-            }
-
-            // --- 🔵 VETTING NUDGES (Vetter pitching) ---
-
-            else if (lead.state === 'VETTING') {
-                instruction = "NUDGE: They went quiet after your pitch. Follow up on the offer.";
-                nextState = 'VETTING_NUDGE_1';
-
-            } else if (lead.state === 'VETTING_NUDGE_1') {
-                instruction = "NUDGE 2: Still no response. Ask if the numbers work or if they need something different.";
-                nextState = 'VETTING_NUDGE_2';
-
-            } else if (lead.state === 'VETTING_NUDGE_2') {
-                instruction = "FINAL NUDGE: Last chance - ask if you should close the file.";
-                nextState = 'DEAD';
-            }
-
-            else if (lead.state === 'PRE_VETTED') {
-                const strategyCheck = await client.query(
-                    `SELECT 1 FROM lead_strategy WHERE conversation_id = $1`,
-                    [lead.id]
-                );
-
-                if (strategyCheck.rows.length === 0) {
-                    console.log(`⏳ [${lead.business_name}] PRE_VETTED - waiting for strategy`);
-                    continue;
-                }
-
-                console.log(`🔍 [${lead.business_name}] PRE_VETTED → VETTING`);
-                instruction = "";
-                nextState = 'VETTING';
-            }
-
-            try {
-                if (shouldTriggerAI) {
                     await axios.post(BACKEND_URL, {
                         conversation_id: lead.id,
-                        system_instruction: instruction,
-                        next_state: nextState !== lead.state ? nextState : null
+                        system_instruction: isNudge ? 'NUDGE: Follow up, they went quiet.' : null,
+                        is_nudge: isNudge
                     });
-                } else if (nextState && nextState !== lead.state) {
-                    await updateState(lead.id, nextState, 'drip');
                 }
+
                 await new Promise(r => setTimeout(r, 2000));
             } catch (err) {
                 console.error(`❌ [${lead.business_name}] Error:`, err.message);
