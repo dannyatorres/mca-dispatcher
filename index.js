@@ -1,7 +1,6 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 const axios = require('axios');
-const { startProcessor } = require('./processorAgent');
 
 // --- CONFIGURATION ---
 const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
@@ -13,8 +12,6 @@ const RUN_INTERVAL_MS = 60 * 1000;
 if (!DATABASE_URL) { console.error("❌ ERROR: DATABASE_URL is missing."); process.exit(1); }
 
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
-
-startProcessor();
 
 function formatName(name) {
     if (!name) return '';
