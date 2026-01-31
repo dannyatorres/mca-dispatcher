@@ -105,8 +105,24 @@ async function runDispatcher() {
                         direct_message: directMessage,
                         next_state: 'DRIP'
                     });
+                } else if (lead.state === 'QUALIFIED') {
+                    // Lead is qualified - time to soft pitch
+                    const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
+
+                    let instruction;
+                    if (isNudge) {
+                        instruction = 'QUALIFIED FOLLOW-UP: You told them you\'d run the numbers. Come back with good news - mention you reviewed their file and have a solid offer ready. Ask if now is a good time to go over it.';
+                    } else {
+                        instruction = 'QUALIFIED RESPONSE: Lead is qualified and waiting. Present the offer or ask what amount would actually help them.';
+                    }
+
+                    await axios.post(BACKEND_URL, {
+                        conversation_id: lead.id,
+                        system_instruction: instruction
+                    });
+
                 } else {
-                    // All other states: let AI decide
+                    // ACTIVE, CLOSING - let AI decide
                     const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
 
                     await axios.post(BACKEND_URL, {
