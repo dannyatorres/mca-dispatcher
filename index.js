@@ -55,7 +55,7 @@ async function runDispatcher() {
                    c.nudge_count, u.agent_name,
                    u.service_settings->>'campaign_hook' AS campaign_hook,
                    last_msg.direction AS last_direction,
-                   EXTRACT(EPOCH FROM (NOW() - c.last_activity_at))/60 as minutes_idle
+                   EXTRACT(EPOCH FROM (NOW() - c.last_activity))/60 as minutes_idle
             FROM conversations c
             JOIN users u ON c.assigned_user_id = u.id
             LEFT JOIN LATERAL (
@@ -69,16 +69,16 @@ async function runDispatcher() {
                   (c.state = 'NEW' AND c.created_at < NOW() - INTERVAL '2 minutes')
                   OR
                   (c.state = 'DRIP' AND c.nudge_count < 4
-                   AND c.last_activity_at < NOW() - INTERVAL '1 hour' * POWER(2, c.nudge_count))
+                   AND c.last_activity < NOW() - INTERVAL '1 hour' * POWER(2, c.nudge_count))
                   OR
                   (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
                    AND last_msg.direction = 'inbound'
-                   AND c.last_activity_at < NOW() - INTERVAL '2 minutes')
+                   AND c.last_activity < NOW() - INTERVAL '2 minutes')
                   OR
                   (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
                    AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
                    AND c.nudge_count < 3
-                   AND c.last_activity_at < NOW() - INTERVAL '15 minutes' * POWER(2, c.nudge_count))
+                   AND c.last_activity < NOW() - INTERVAL '15 minutes' * POWER(2, c.nudge_count))
               )
             LIMIT $1
         `;
