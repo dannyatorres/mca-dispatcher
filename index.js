@@ -33,10 +33,10 @@ async function runDispatcher() {
         hour12: false
     }));
 
-    if (estHour < 8 || estHour >= 22) {
-        console.log(`😴 Outside business hours (${estHour}:00 EST) - sleeping`);
-        return;
-    }
+    // if (estHour < 8 || estHour >= 22) {
+    //     console.log(`😴 Outside business hours (${estHour}:00 EST) - sleeping`);
+    //     return;
+    // }
 
     if (isRunning) {
         console.log('⏭️ Previous run still active - skipping');
