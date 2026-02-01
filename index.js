@@ -71,6 +71,9 @@ async function runDispatcher() {
                   (c.state = 'DRIP' AND c.nudge_count < 4
                    AND c.last_activity < NOW() - INTERVAL '1 hour' * POWER(2, c.nudge_count))
                   OR
+                  (c.state = 'QUALIFIED' AND c.nudge_count = 0
+                   AND c.last_activity < NOW() - INTERVAL '2 minutes')
+                  OR
                   (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
                    AND last_msg.direction = 'inbound'
                    AND c.last_activity < NOW() - INTERVAL '2 minutes')
