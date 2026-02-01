@@ -6,8 +6,8 @@ const axios = require('axios');
 const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
 const DATABASE_URL = process.env.DATABASE_URL;
 const BATCH_SIZE = 10;
-// ⚡ TURBO MODE: Check every 60 seconds
-const RUN_INTERVAL_MS = 60 * 1000; 
+// ⚡ TURBO MODE: Check every 3 minutes
+const RUN_INTERVAL_MS = 3 * 60 * 1000; 
 
 if (!DATABASE_URL) { console.error("❌ ERROR: DATABASE_URL is missing."); process.exit(1); }
 
@@ -66,17 +66,22 @@ async function runDispatcher() {
             WHERE c.state NOT IN ('DEAD', 'FUNDED', 'SUBMITTED', 'ARCHIVED')
               AND c.ai_enabled != false
               AND (
-                  (c.state = 'NEW' AND c.created_at < NOW() - INTERVAL '2 minutes')
+                  (c.state = 'NEW' AND c.created_at < NOW() - INTERVAL '1 minute')
                   OR
                   (c.state = 'DRIP' AND c.nudge_count < 4
-                   AND c.last_activity < NOW() - INTERVAL '1 hour' * POWER(2, c.nudge_count))
+                   AND c.last_activity < NOW() - CASE
+                       WHEN c.nudge_count = 0 THEN INTERVAL '15 minutes'
+                       WHEN c.nudge_count = 1 THEN INTERVAL '30 minutes'
+                       WHEN c.nudge_count = 2 THEN INTERVAL '1 hour'
+                       ELSE INTERVAL '4 hours'
+                   END)
                   OR
                   (c.state = 'QUALIFIED' AND c.nudge_count = 0
-                   AND c.last_activity < NOW() - INTERVAL '2 minutes')
+                   AND c.last_activity < NOW() - INTERVAL '5 minutes')
                   OR
                   (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
                    AND last_msg.direction = 'inbound'
-                   AND c.last_activity < NOW() - INTERVAL '2 minutes')
+                   AND c.last_activity < NOW() - INTERVAL '5 minutes')
                   OR
                   (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
                    AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
@@ -108,6 +113,24 @@ async function runDispatcher() {
                         direct_message: directMessage,
                         next_state: 'DRIP'
                     });
+
+                } else if (lead.state === 'DRIP') {
+                    // DRIP follow-ups - templates, no AI
+                    const templates = [
+                        "Did you get funded already?",
+                        "The money is expensive as is let me compete.",
+                        "Hey just following up again, should i close the file out?",
+                        "Hey let me know if i should close this out"
+                    ];
+
+                    if (lead.nudge_count < templates.length) {
+                        await axios.post(BACKEND_URL, {
+                            conversation_id: lead.id,
+                            direct_message: templates[lead.nudge_count],
+                            is_nudge: true
+                        });
+                    }
+
                 } else if (lead.state === 'QUALIFIED') {
                     // Lead is qualified - time to soft pitch
                     const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
