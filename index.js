@@ -80,13 +80,19 @@ async function runDispatcher() {
                    AND c.last_activity < NOW() - INTERVAL '5 minutes')
                   OR
                   (c.state = 'PITCH_READY'
-                   AND c.last_activity < NOW() - INTERVAL '1 minute')
-                  OR
-                  (c.state IN ('ACTIVE', 'PITCH_READY', 'CLOSING')
                    AND last_msg.direction = 'inbound'
                    AND c.last_activity < NOW() - INTERVAL '5 minutes')
                   OR
-                  (c.state IN ('ACTIVE', 'PITCH_READY', 'CLOSING')
+                  (c.state = 'PITCH_READY'
+                   AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
+                   AND c.nudge_count < 2
+                   AND c.last_activity < NOW() - INTERVAL '30 minutes')
+                  OR
+                  (c.state IN ('ACTIVE', 'CLOSING')
+                   AND last_msg.direction = 'inbound'
+                   AND c.last_activity < NOW() - INTERVAL '5 minutes')
+                  OR
+                  (c.state IN ('ACTIVE', 'CLOSING')
                    AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
                    AND c.nudge_count < 3
                    AND c.last_activity < NOW() - INTERVAL '15 minutes' * POWER(2, c.nudge_count))
@@ -154,7 +160,8 @@ async function runDispatcher() {
                     // Commander has strategy, time to pitch
                     await axios.post(BACKEND_URL, {
                         conversation_id: lead.id,
-                        system_instruction: 'PITCH: You have the strategy and offer range. Present the offer confidently. Ask what amount would help them.'
+                        system_instruction: 'PITCH: Present the offer confidently.',
+                        is_nudge: true
                     });
 
                 } else {
