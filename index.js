@@ -147,6 +147,13 @@ async function runDispatcher() {
                         system_instruction: instruction
                     });
 
+                } else if (lead.state === 'PITCH_READY') {
+                    // Commander has strategy, time to pitch
+                    await axios.post(BACKEND_URL, {
+                        conversation_id: lead.id,
+                        system_instruction: 'PITCH: You have the strategy and offer range. Present the offer confidently. Ask what amount would help them.'
+                    });
+
                 } else {
                     // ACTIVE, CLOSING - let AI decide
                     const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
