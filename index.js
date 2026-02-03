@@ -79,11 +79,14 @@ async function runDispatcher() {
                   (c.state = 'QUALIFIED' AND c.nudge_count = 0
                    AND c.last_activity < NOW() - INTERVAL '5 minutes')
                   OR
-                  (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
+                  (c.state = 'PITCH_READY'
+                   AND c.last_activity < NOW() - INTERVAL '1 minute')
+                  OR
+                  (c.state IN ('ACTIVE', 'PITCH_READY', 'CLOSING')
                    AND last_msg.direction = 'inbound'
                    AND c.last_activity < NOW() - INTERVAL '5 minutes')
                   OR
-                  (c.state IN ('ACTIVE', 'QUALIFIED', 'CLOSING')
+                  (c.state IN ('ACTIVE', 'PITCH_READY', 'CLOSING')
                    AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
                    AND c.nudge_count < 3
                    AND c.last_activity < NOW() - INTERVAL '15 minutes' * POWER(2, c.nudge_count))
