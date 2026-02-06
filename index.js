@@ -5,9 +5,12 @@ const axios = require('axios');
 // --- CONFIGURATION ---
 const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
 const DATABASE_URL = process.env.DATABASE_URL;
-const BATCH_SIZE = 10;
+const BATCH_SIZE = 10;        // AI leads per cycle
+const NEW_BATCH_SIZE = 50;    // NEW leads per cycle (template-only, no AI)
+const NEW_DELAY_MS = 5000;    // 5s between NEW lead sends (safe for Twilio long codes)
+const AI_DELAY_MS = 2000;     // 2s between AI lead sends
 // ⚡ TURBO MODE: Check every 3 minutes
-const RUN_INTERVAL_MS = 3 * 60 * 1000; 
+const RUN_INTERVAL_MS = 3 * 60 * 1000;
 
 if (!DATABASE_URL) { console.error("❌ ERROR: DATABASE_URL is missing."); process.exit(1); }
 
@@ -50,10 +53,47 @@ async function runDispatcher() {
     try {
         client = await pool.connect();
 
-        const query = `
+        // === PASS 1: Blast through NEW leads (no AI, just templates) ===
+        const newLeadsQuery = `
+            SELECT c.id, c.lead_phone, c.business_name, c.first_name,
+                   u.agent_name,
+                   u.service_settings->>'campaign_hook' AS campaign_hook
+            FROM conversations c
+            JOIN users u ON c.assigned_user_id = u.id
+            WHERE c.state = 'NEW'
+              AND c.ai_enabled != false
+              AND c.created_at < NOW() - INTERVAL '1 minute'
+            LIMIT $1
+        `;
+
+        const newLeads = await client.query(newLeadsQuery, [NEW_BATCH_SIZE]);
+        console.log(`📨 NEW leads to hook: ${newLeads.rows.length}`);
+
+        for (const lead of newLeads.rows) {
+            try {
+                const hook = lead.campaign_hook || "Hi {{first_name}}, my name is {{AGENT_NAME}}...";
+                const firstName = formatName(lead.first_name) || 'there';
+                const agentName = lead.agent_name || 'Dan Torres';
+                const directMessage = hook
+                    .replace(/\{\{first_name\}\}/gi, firstName)
+                    .replace(/\{\{AGENT_NAME\}\}/gi, agentName);
+
+                await axios.post(BACKEND_URL, {
+                    conversation_id: lead.id,
+                    direct_message: directMessage,
+                    next_state: 'DRIP'
+                });
+
+                await new Promise(r => setTimeout(r, NEW_DELAY_MS));
+            } catch (err) {
+                console.error(`❌ [${lead.business_name}] Hook error:`, err.message);
+            }
+        }
+
+        // === PASS 2: AI-driven leads (DRIP, QUALIFIED, ACTIVE, etc.) ===
+        const aiLeadsQuery = `
             SELECT c.id, c.lead_phone, c.state, c.business_name, c.first_name,
                    c.nudge_count, u.agent_name,
-                   u.service_settings->>'campaign_hook' AS campaign_hook,
                    last_msg.direction AS last_direction,
                    EXTRACT(EPOCH FROM (NOW() - c.last_activity))/60 as minutes_idle
             FROM conversations c
@@ -63,11 +103,9 @@ async function runDispatcher() {
                 WHERE m.conversation_id = c.id
                 ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
-            WHERE c.state NOT IN ('DEAD', 'FUNDED', 'SUBMITTED', 'ARCHIVED')
+            WHERE c.state NOT IN ('NEW', 'DEAD', 'FUNDED', 'SUBMITTED', 'ARCHIVED')
               AND c.ai_enabled != false
               AND (
-                  (c.state = 'NEW' AND c.created_at < NOW() - INTERVAL '1 minute')
-                  OR
                   (c.state = 'DRIP' AND c.nudge_count < 4
                    AND c.last_activity < NOW() - CASE
                        WHEN c.nudge_count = 0 THEN INTERVAL '15 minutes'
@@ -100,30 +138,19 @@ async function runDispatcher() {
             LIMIT $1
         `;
 
-        const { rows } = await client.query(query, [BATCH_SIZE]);
-        console.log(`📊 Found ${rows.length} leads to process`);
-        if (rows.length === 0) { console.log('✅ No leads need attention.'); return; }
+        const aiLeads = await client.query(aiLeadsQuery, [BATCH_SIZE]);
+        console.log(`🤖 AI leads to process: ${aiLeads.rows.length}`);
 
-        for (const lead of rows) {
+        if (newLeads.rows.length === 0 && aiLeads.rows.length === 0) {
+            console.log('✅ No leads need attention.');
+            return;
+        }
+
+        for (const lead of aiLeads.rows) {
             console.log(`➡️ Processing: ${lead.business_name} [${lead.state}] nudge:${lead.nudge_count}`);
 
             try {
-                if (lead.state === 'NEW') {
-                    // Send hook directly, no AI needed
-                    const hook = lead.campaign_hook || "Hi {{first_name}}, my name is {{AGENT_NAME}}...";
-                    const firstName = formatName(lead.first_name) || 'there';
-                    const agentName = lead.agent_name || 'Dan Torres';
-                    const directMessage = hook
-                        .replace(/\{\{first_name\}\}/gi, firstName)
-                        .replace(/\{\{AGENT_NAME\}\}/gi, agentName);
-
-                    await axios.post(BACKEND_URL, {
-                        conversation_id: lead.id,
-                        direct_message: directMessage,
-                        next_state: 'DRIP'
-                    });
-
-                } else if (lead.state === 'DRIP') {
+                if (lead.state === 'DRIP') {
                     // DRIP follow-ups - templates, no AI
                     const templates = [
                         "Did you get funded already?",
@@ -175,7 +202,7 @@ async function runDispatcher() {
                     });
                 }
 
-                await new Promise(r => setTimeout(r, 2000));
+                await new Promise(r => setTimeout(r, AI_DELAY_MS));
             } catch (err) {
                 console.error(`❌ [${lead.business_name}] Error:`, err.message);
             }
