@@ -180,7 +180,8 @@ async function runDispatcher() {
 
                     await axios.post(BACKEND_URL, {
                         conversation_id: lead.id,
-                        system_instruction: instruction
+                        system_instruction: instruction,
+                        is_nudge: isNudge
                     });
 
                 } else if (lead.state === 'PITCH_READY') {
