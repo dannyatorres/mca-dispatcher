@@ -246,3 +246,25 @@ function checkMorningRun() {
 }
 
 setInterval(checkMorningRun, 60 * 1000);
+
+// --- DAILY REPORT SCHEDULER ---
+let lastDailyReport = null;
+
+function checkDailyReport() {
+    const now = new Date();
+    const estHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+    const today = now.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+
+    if (estHour === 22 && lastDailyReport !== today) {
+        lastDailyReport = today;
+        console.log('📊 10pm EST - Generating daily report');
+
+        const { generateDailyReport } = require('./services/dailyAgent');
+        const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+        generateDailyReport(dateStr)
+            .then(() => console.log('📊 Daily report complete'))
+            .catch(err => console.error('📊 Daily report failed:', err.message));
+    }
+}
+
+setInterval(checkDailyReport, 60 * 1000);
