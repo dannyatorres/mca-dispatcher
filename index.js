@@ -260,11 +260,10 @@ function checkDailyReport() {
         lastDailyReport = today;
         console.log('📊 10pm EST - Generating daily report');
 
-        const { generateDailyReport } = require('./services/dailyAgent');
         const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
-        generateDailyReport(dateStr)
-            .then(() => console.log('📊 Daily report complete'))
-            .catch(err => console.error('📊 Daily report failed:', err.message));
+        axios.post(BACKEND_URL.replace('/api/agent/trigger', '/api/daily-reports/generate'), { date: dateStr })
+            .then(() => console.log('📊 Daily report triggered via API'))
+            .catch(err => console.error('📊 Daily report trigger failed:', err.message));
     }
 }
 
