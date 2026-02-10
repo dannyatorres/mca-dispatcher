@@ -5,9 +5,9 @@ const axios = require('axios');
 // --- CONFIGURATION ---
 const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
 const DATABASE_URL = process.env.DATABASE_URL;
-const BATCH_SIZE = 10;        // AI leads per cycle
-const NEW_BATCH_SIZE = 50;    // NEW leads per cycle (template-only, no AI)
-const NEW_DELAY_MS = 5000;    // 5s between NEW lead sends (safe for Twilio long codes)
+const BATCH_SIZE = 100;       // AI leads per cycle
+const NEW_BATCH_SIZE = 100;   // NEW leads per cycle (template-only, no AI)
+const NEW_DELAY_MS = 2000;    // 2s between NEW lead sends (safe for Twilio long codes)
 const AI_DELAY_MS = 2000;     // 2s between AI lead sends
 // ⚡ TURBO MODE: Check every 3 minutes
 const RUN_INTERVAL_MS = 3 * 60 * 1000;
@@ -63,6 +63,7 @@ async function runDispatcher() {
             WHERE c.state = 'NEW'
               AND c.ai_enabled != false
               AND c.created_at < NOW() - INTERVAL '1 minute'
+            FOR UPDATE OF c SKIP LOCKED
             LIMIT $1
         `;
 
@@ -135,6 +136,7 @@ async function runDispatcher() {
                    AND c.nudge_count < 3
                    AND c.last_activity < NOW() - INTERVAL '15 minutes' * POWER(2, c.nudge_count))
               )
+            FOR UPDATE OF c SKIP LOCKED
             LIMIT $1
         `;
 
