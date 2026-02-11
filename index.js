@@ -111,7 +111,7 @@ async function runDispatcher() {
                 'OFFER_RECEIVED', 'NEGOTIATING', 'VERBAL_ACCEPT',
                 'CLOSED_WON', 'CLOSED_LOST',
                 'SENT_HOOK', 'SENT_FU_1', 'SENT_FU_2', 'SENT_FU_3', 'SENT_FU_4',
-                'REPLIED'
+                'REPLIED', 'INTERESTED'
             )
               AND c.ai_enabled != false
               -- HUMAN ACTIVITY GUARD: Skip if human sent in last 5 min
