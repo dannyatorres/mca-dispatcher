@@ -9,8 +9,8 @@ const BATCH_SIZE = 100;       // AI leads per cycle
 const NEW_BATCH_SIZE = 100;   // NEW leads per cycle (template-only, no AI)
 const NEW_DELAY_MS = 2000;    // 2s between NEW lead sends (safe for Twilio long codes)
 const AI_DELAY_MS = 2000;     // 2s between AI lead sends
-// ⚡ TURBO MODE: Check every 3 minutes
-const RUN_INTERVAL_MS = 3 * 60 * 1000;
+// ⚡ TURBO MODE: Check every 2 minutes
+const RUN_INTERVAL_MS = 2 * 60 * 1000;
 
 if (!DATABASE_URL) { console.error("❌ ERROR: DATABASE_URL is missing."); process.exit(1); }
 
@@ -96,16 +96,25 @@ async function runDispatcher() {
             SELECT c.id, c.lead_phone, c.state, c.business_name, c.first_name,
                    c.nudge_count, u.agent_name,
                    last_msg.direction AS last_direction,
+                   last_msg.sent_by AS last_sent_by,
                    EXTRACT(EPOCH FROM (NOW() - c.last_activity))/60 as minutes_idle
             FROM conversations c
             JOIN users u ON c.assigned_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT direction FROM messages m
+                SELECT direction, sent_by FROM messages m
                 WHERE m.conversation_id = c.id
                 ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
             WHERE c.state NOT IN ('NEW', 'DEAD', 'FUNDED', 'SUBMITTED', 'ARCHIVED')
               AND c.ai_enabled != false
+              -- HUMAN ACTIVITY GUARD: Skip if human sent in last 5 min
+              AND NOT EXISTS (
+                  SELECT 1 FROM messages m2
+                  WHERE m2.conversation_id = c.id
+                    AND m2.sent_by = 'user'
+                    AND m2.direction = 'outbound'
+                    AND m2.timestamp > NOW() - INTERVAL '5 minutes'
+              )
               AND (
                   (c.state = 'DRIP' AND c.nudge_count < 4
                    AND c.last_activity < NOW() - CASE
@@ -115,21 +124,15 @@ async function runDispatcher() {
                        ELSE INTERVAL '4 hours'
                    END)
                   OR
-                  (c.state = 'QUALIFIED' AND c.nudge_count = 0
-                   AND c.last_activity < NOW() - INTERVAL '5 minutes')
-                  OR
-                  (c.state = 'PITCH_READY'
-                   AND last_msg.direction = 'inbound'
-                   AND c.last_activity < NOW() - INTERVAL '5 minutes')
+                  -- UNIVERSAL INBOUND: Lead replied, we haven't responded yet
+                  -- 2 min delay = human-like. Replaces webhook AI trigger.
+                  (last_msg.direction = 'inbound'
+                   AND c.last_activity < NOW() - INTERVAL '2 minutes')
                   OR
                   (c.state = 'PITCH_READY'
                    AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
                    AND c.nudge_count < 2
                    AND c.last_activity < NOW() - INTERVAL '30 minutes')
-                  OR
-                  (c.state IN ('ACTIVE', 'CLOSING')
-                   AND last_msg.direction = 'inbound'
-                   AND c.last_activity < NOW() - INTERVAL '5 minutes')
                   OR
                   (c.state IN ('ACTIVE', 'CLOSING')
                    AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
@@ -153,20 +156,32 @@ async function runDispatcher() {
 
             try {
                 if (lead.state === 'DRIP') {
-                    // DRIP follow-ups - templates, no AI
-                    const templates = [
-                        "Did you get funded already?",
-                        "The money is expensive as is let me compete.",
-                        "Hey just following up again, should i close the file out?",
-                        "Hey let me know if i should close this out"
-                    ];
+                    const isInbound = lead.last_direction === 'inbound';
 
-                    if (lead.nudge_count < templates.length) {
+                    if (isInbound) {
+                        // Lead replied during drip - let AI handle
+                        console.log(`📬 [${lead.business_name}] Lead replied during DRIP - switching to AI`);
                         await axios.post(BACKEND_URL, {
                             conversation_id: lead.id,
-                            direct_message: templates[lead.nudge_count],
-                            is_nudge: true
+                            system_instruction: null,
+                            is_nudge: false
                         });
+                    } else {
+                        // Original template logic stays the same
+                        const templates = [
+                            "Did you get funded already?",
+                            "The money is expensive as is let me compete.",
+                            "Hey just following up again, should i close the file out?",
+                            "Hey let me know if i should close this out"
+                        ];
+
+                        if (lead.nudge_count < templates.length) {
+                            await axios.post(BACKEND_URL, {
+                                conversation_id: lead.id,
+                                direct_message: templates[lead.nudge_count],
+                                is_nudge: true
+                            });
+                        }
                     }
 
                 } else if (lead.state === 'QUALIFIED') {
