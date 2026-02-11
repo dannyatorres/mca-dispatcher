@@ -5,7 +5,7 @@ const axios = require('axios');
 // --- CONFIGURATION ---
 const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
 const DATABASE_URL = process.env.DATABASE_URL;
-const BATCH_SIZE = 100;       // AI leads per cycle
+const BATCH_SIZE = 20;        // AI leads per cycle (keep low to avoid SIGTERM)
 const NEW_BATCH_SIZE = 100;   // NEW leads per cycle (template-only, no AI)
 const NEW_DELAY_MS = 2000;    // 2s between NEW lead sends (safe for Twilio long codes)
 const AI_DELAY_MS = 2000;     // 2s between AI lead sends
@@ -105,7 +105,14 @@ async function runDispatcher() {
                 WHERE m.conversation_id = c.id
                 ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
-            WHERE c.state NOT IN ('NEW', 'DEAD', 'FUNDED', 'SUBMITTED', 'ARCHIVED')
+            WHERE c.state NOT IN (
+                'NEW', 'DEAD', 'FUNDED', 'SUBMITTED', 'ARCHIVED',
+                'HUMAN_REVIEW', 'STRATEGIZED', 'HOT_LEAD', 'VETTING',
+                'OFFER_RECEIVED', 'NEGOTIATING', 'VERBAL_ACCEPT',
+                'CLOSED_WON', 'CLOSED_LOST',
+                'SENT_HOOK', 'SENT_FU_1', 'SENT_FU_2', 'SENT_FU_3', 'SENT_FU_4',
+                'REPLIED'
+            )
               AND c.ai_enabled != false
               -- HUMAN ACTIVITY GUARD: Skip if human sent in last 5 min
               AND NOT EXISTS (
