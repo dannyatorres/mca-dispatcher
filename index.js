@@ -137,9 +137,8 @@ async function runDispatcher() {
                    AND c.last_activity < NOW() - INTERVAL '2 minutes')
                   OR
                   (c.state = 'PITCH_READY'
-                   AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
-                   AND c.nudge_count < 2
-                   AND c.last_activity < NOW() - INTERVAL '30 minutes')
+                   AND last_msg.direction = 'inbound'
+                   AND c.last_activity < NOW() - INTERVAL '2 minutes')
                   OR
                   (c.state IN ('ACTIVE', 'CLOSING')
                    AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
