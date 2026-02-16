@@ -42,7 +42,7 @@ async function runDispatcher() {
     }
 
     // 🛑 KILL SWITCH - flip to false when ready to resume
-    const AI_KILLED = true;
+    const AI_KILLED = false;
     if (AI_KILLED) {
         console.log(`🛑 AI KILLED - dispatcher skipping all processing`);
         return;
