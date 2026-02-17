@@ -178,7 +178,10 @@ async function runActiveLoop() {
         hour12: false
     }));
 
-    if (estHour < 8 || estHour >= 22) return;
+    if (estHour < 8 || estHour >= 22) {
+        console.log(`😴 Outside business hours (${estHour}:00 EST)`);
+        return;
+    }
 
     const AI_KILLED = false;
     if (AI_KILLED) return;
