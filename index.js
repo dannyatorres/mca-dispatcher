@@ -5,12 +5,8 @@ const axios = require('axios');
 // --- CONFIGURATION ---
 const BACKEND_URL = "https://mcagent.io/api/agent/trigger";
 const DATABASE_URL = process.env.DATABASE_URL;
-const BATCH_SIZE = 20;        // AI leads per cycle (keep low to avoid SIGTERM)
-const NEW_BATCH_SIZE = 100;   // NEW leads per cycle (template-only, no AI)
 const NEW_DELAY_MS = 2000;    // 2s between NEW lead sends (safe for Twilio long codes)
 const AI_DELAY_MS = 2000;     // 2s between AI lead sends
-// ⚡ TURBO MODE: Check every 2 minutes
-const RUN_INTERVAL_MS = 2 * 60 * 1000;
 
 if (!DATABASE_URL) { console.error("❌ ERROR: DATABASE_URL is missing."); process.exit(1); }
 
@@ -25,10 +21,10 @@ function formatName(name) {
         .join(' ');
 }
 
-let isRunning = false;
+let isDripRunning = false;
+let isActiveRunning = false;
 
-async function runDispatcher() {
-    // Check business hours (8am - 10pm EST)
+async function runDripLoop() {
     const now = new Date();
     const estHour = parseInt(now.toLocaleString('en-US', {
         timeZone: 'America/New_York',
@@ -36,31 +32,24 @@ async function runDispatcher() {
         hour12: false
     }));
 
-    if (estHour < 8 || estHour >= 22) {
-        console.log(`😴 Outside business hours (${estHour}:00 EST) - sleeping`);
-        return;
-    }
+    if (estHour < 8 || estHour >= 22) return;
 
-    // 🛑 KILL SWITCH - flip to false when ready to resume
     const AI_KILLED = false;
-    if (AI_KILLED) {
-        console.log(`🛑 AI KILLED - dispatcher skipping all processing`);
+    if (AI_KILLED) return;
+
+    if (isDripRunning) {
+        console.log('⭕ Drip loop still active - skipping');
         return;
     }
+    isDripRunning = true;
 
-    if (isRunning) {
-        console.log('⏭️ Previous run still active - skipping');
-        return;
-    }
-    isRunning = true;
-
-    console.log('🚀 DISPATCHER v2.1 -', new Date().toISOString());
+    console.log('📨 DRIP LOOP -', new Date().toISOString());
     let client;
 
     try {
         client = await pool.connect();
 
-        // === PASS 1: Blast through NEW leads (no AI, just templates) ===
+        // NEW leads - hook templates
         const newLeadsQuery = `
             SELECT c.id, c.lead_phone, c.business_name, c.first_name,
                    u.agent_name,
@@ -71,10 +60,10 @@ async function runDispatcher() {
               AND c.ai_enabled != false
               AND c.created_at < NOW() - INTERVAL '1 minute'
             FOR UPDATE OF c SKIP LOCKED
-            LIMIT $1
+            LIMIT 500
         `;
 
-        const newLeads = await client.query(newLeadsQuery, [NEW_BATCH_SIZE]);
+        const newLeads = await client.query(newLeadsQuery, []);
         console.log(`📨 NEW leads to hook: ${newLeads.rows.length}`);
 
         for (const lead of newLeads.rows) {
@@ -98,30 +87,21 @@ async function runDispatcher() {
             }
         }
 
-        // === PASS 2: AI-driven leads (DRIP, QUALIFIED, ACTIVE, etc.) ===
-        const aiLeadsQuery = `
+        // DRIP leads - follow-up templates
+        const dripQuery = `
             SELECT c.id, c.lead_phone, c.state, c.business_name, c.first_name,
                    c.nudge_count, u.agent_name,
-                   last_msg.direction AS last_direction,
-                   last_msg.sent_by AS last_sent_by,
-                   EXTRACT(EPOCH FROM (NOW() - c.last_activity))/60 as minutes_idle
+                   last_msg.direction AS last_direction
             FROM conversations c
             JOIN users u ON c.assigned_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT direction, sent_by FROM messages m
+                SELECT direction FROM messages m
                 WHERE m.conversation_id = c.id
                 ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
-            WHERE c.state NOT IN (
-                'NEW', 'DEAD', 'FUNDED', 'SUBMITTED', 'ARCHIVED',
-                'HUMAN_REVIEW', 'STRATEGIZED', 'HOT_LEAD', 'VETTING',
-                'OFFER_RECEIVED', 'NEGOTIATING', 'VERBAL_ACCEPT',
-                'CLOSED_WON', 'CLOSED_LOST',
-                'SENT_HOOK', 'SENT_FU_1', 'SENT_FU_2', 'SENT_FU_3', 'SENT_FU_4',
-                'REPLIED', 'INTERESTED'
-            )
+            WHERE c.state = 'DRIP'
               AND c.ai_enabled != false
-              -- HUMAN ACTIVITY GUARD: Skip if human sent in last 5 min
+              AND c.last_activity > NOW() - INTERVAL '3 days'
               AND NOT EXISTS (
                   SELECT 1 FROM messages m2
                   WHERE m2.conversation_id = c.id
@@ -129,23 +109,121 @@ async function runDispatcher() {
                     AND m2.direction = 'outbound'
                     AND m2.timestamp > NOW() - INTERVAL '5 minutes'
               )
-              AND c.last_activity > NOW() - INTERVAL '3 days'
               AND (
-                  (c.state = 'DRIP' AND c.nudge_count < 4
+                  -- Inbound: lead replied during drip, switch to AI
+                  (last_msg.direction = 'inbound'
+                   AND c.last_activity < NOW() - INTERVAL '2 minutes')
+                  OR
+                  -- Outbound: time for next template
+                  (c.nudge_count < 4
                    AND c.last_activity < NOW() - CASE
                        WHEN c.nudge_count = 0 THEN INTERVAL '15 minutes'
                        WHEN c.nudge_count = 1 THEN INTERVAL '30 minutes'
                        WHEN c.nudge_count = 2 THEN INTERVAL '1 hour'
                        ELSE INTERVAL '4 hours'
                    END)
-                  OR
-                  -- UNIVERSAL INBOUND: Lead replied, we haven't responded yet
-                  -- 2 min delay = human-like. Replaces webhook AI trigger.
+              )
+            FOR UPDATE OF c SKIP LOCKED
+            LIMIT 500
+        `;
+
+        const dripLeads = await client.query(dripQuery, []);
+        console.log(`📨 DRIP leads to process: ${dripLeads.rows.length}`);
+
+        for (const lead of dripLeads.rows) {
+            try {
+                if (lead.last_direction === 'inbound') {
+                    console.log(`📬 [${lead.business_name}] Lead replied during DRIP - switching to AI`);
+                    await axios.post(BACKEND_URL, {
+                        conversation_id: lead.id,
+                        system_instruction: null,
+                        is_nudge: false
+                    });
+                } else {
+                    const templates = [
+                        "Did you get funded already?",
+                        "The money is expensive as is let me compete.",
+                        "Hey just following up again, should i close the file out?",
+                        "Hey let me know if i should close this out"
+                    ];
+
+                    if (lead.nudge_count < templates.length) {
+                        await axios.post(BACKEND_URL, {
+                            conversation_id: lead.id,
+                            direct_message: templates[lead.nudge_count],
+                            is_nudge: true
+                        });
+                    }
+                }
+
+                await new Promise(r => setTimeout(r, NEW_DELAY_MS));
+            } catch (err) {
+                console.error(`❌ [${lead.business_name}] Drip error:`, err.message);
+            }
+        }
+
+    } catch (err) {
+        console.error('🔥 Drip Loop Error:', err);
+    } finally {
+        isDripRunning = false;
+        if (client) client.release();
+    }
+}
+
+async function runActiveLoop() {
+    const now = new Date();
+    const estHour = parseInt(now.toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        hour: 'numeric',
+        hour12: false
+    }));
+
+    if (estHour < 8 || estHour >= 22) return;
+
+    const AI_KILLED = false;
+    if (AI_KILLED) return;
+
+    if (isActiveRunning) {
+        console.log('⭕ Active loop still active - skipping');
+        return;
+    }
+    isActiveRunning = true;
+
+    console.log('🤖 ACTIVE LOOP -', new Date().toISOString());
+    let client;
+
+    try {
+        client = await pool.connect();
+
+        const activeQuery = `
+            SELECT c.id, c.lead_phone, c.state, c.business_name, c.first_name,
+                   c.nudge_count, u.agent_name,
+                   last_msg.direction AS last_direction,
+                   EXTRACT(EPOCH FROM (NOW() - c.last_activity))/60 as minutes_idle
+            FROM conversations c
+            JOIN users u ON c.assigned_user_id = u.id
+            LEFT JOIN LATERAL (
+                SELECT direction FROM messages m
+                WHERE m.conversation_id = c.id
+                ORDER BY m.timestamp DESC LIMIT 1
+            ) last_msg ON true
+            WHERE c.state IN ('ACTIVE', 'CLOSING')
+              AND c.ai_enabled != false
+              AND c.last_activity > NOW() - INTERVAL '3 days'
+              AND NOT EXISTS (
+                  SELECT 1 FROM messages m2
+                  WHERE m2.conversation_id = c.id
+                    AND m2.sent_by = 'user'
+                    AND m2.direction = 'outbound'
+                    AND m2.timestamp > NOW() - INTERVAL '5 minutes'
+              )
+              AND (
+                  -- INBOUND: Lead replied, respond fast
                   (last_msg.direction = 'inbound'
                    AND c.last_activity < NOW() - INTERVAL '2 minutes')
                   OR
-                  (c.state IN ('ACTIVE', 'CLOSING')
-                   AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
+                  -- OUTBOUND NUDGE: They went quiet
+                  ((last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
                    AND c.nudge_count < 6
                    AND c.last_activity < NOW() - CASE
                        WHEN c.nudge_count = 0 THEN INTERVAL '15 minutes'
@@ -156,69 +234,27 @@ async function runDispatcher() {
                        ELSE INTERVAL '24 hours'
                    END)
               )
+            ORDER BY
+                CASE WHEN last_msg.direction = 'inbound' THEN 0 ELSE 1 END,
+                c.last_activity ASC
             FOR UPDATE OF c SKIP LOCKED
-            LIMIT $1
+            LIMIT 200
         `;
 
-        const aiLeads = await client.query(aiLeadsQuery, [BATCH_SIZE]);
-        console.log(`🤖 AI leads to process: ${aiLeads.rows.length}`);
+        const activeLeads = await client.query(activeQuery, []);
+        console.log(`🤖 Active leads to process: ${activeLeads.rows.length}`);
 
-        if (newLeads.rows.length === 0 && aiLeads.rows.length === 0) {
-            console.log('✅ No leads need attention.');
-            return;
-        }
-
-        for (const lead of aiLeads.rows) {
+        for (const lead of activeLeads.rows) {
             console.log(`➡️ Processing: ${lead.business_name} [${lead.state}] nudge:${lead.nudge_count}`);
 
             try {
-                if (lead.state === 'DRIP') {
-                    const isInbound = lead.last_direction === 'inbound';
+                const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
 
-                    if (isInbound) {
-                        // Lead replied during drip - let AI handle
-                        console.log(`📬 [${lead.business_name}] Lead replied during DRIP - switching to AI`);
-                        await axios.post(BACKEND_URL, {
-                            conversation_id: lead.id,
-                            system_instruction: null,
-                            is_nudge: false
-                        });
-                    } else {
-                        // Original template logic stays the same
-                        const templates = [
-                            "Did you get funded already?",
-                            "The money is expensive as is let me compete.",
-                            "Hey just following up again, should i close the file out?",
-                            "Hey let me know if i should close this out"
-                        ];
-
-                        if (lead.nudge_count < templates.length) {
-                            await axios.post(BACKEND_URL, {
-                                conversation_id: lead.id,
-                                direct_message: templates[lead.nudge_count],
-                                is_nudge: true
-                            });
-                        }
-                    }
-
-                } else if (lead.state === 'ACTIVE') {
-                    const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
-
-                    await axios.post(BACKEND_URL, {
-                        conversation_id: lead.id,
-                        system_instruction: isNudge ? `NUDGE #${lead.nudge_count + 1}` : null,
-                        is_nudge: isNudge
-                    });
-
-                } else if (lead.state === 'CLOSING') {
-                    const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
-
-                    await axios.post(BACKEND_URL, {
-                        conversation_id: lead.id,
-                        system_instruction: isNudge ? `NUDGE #${lead.nudge_count + 1}` : null,
-                        is_nudge: isNudge
-                    });
-                }
+                await axios.post(BACKEND_URL, {
+                    conversation_id: lead.id,
+                    system_instruction: isNudge ? `NUDGE #${lead.nudge_count + 1}` : null,
+                    is_nudge: isNudge
+                });
 
                 await new Promise(r => setTimeout(r, AI_DELAY_MS));
             } catch (err) {
@@ -227,15 +263,27 @@ async function runDispatcher() {
         }
 
     } catch (err) {
-        console.error('🔥 Critical Error:', err);
+        console.error('🔥 Active Loop Error:', err);
     } finally {
-        isRunning = false;
+        isActiveRunning = false;
         if (client) client.release();
     }
 }
 
-runDispatcher();
-setInterval(runDispatcher, RUN_INTERVAL_MS);
+// Drip loop - every 60s (templates are fast)
+async function dripLoop() {
+    await runDripLoop();
+    setTimeout(dripLoop, 60 * 1000);
+}
+
+// Active loop - every 30s (prioritize responsiveness)
+async function activeLoop() {
+    await runActiveLoop();
+    setTimeout(activeLoop, 30 * 1000);
+}
+
+dripLoop();
+activeLoop();
 
 // --- MORNING FOLLOW-UP SCHEDULER ---
 let lastMorningRun = null;
