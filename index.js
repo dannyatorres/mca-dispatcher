@@ -210,7 +210,7 @@ async function runActiveLoop() {
                 WHERE m.conversation_id = c.id
                 ORDER BY m.timestamp DESC LIMIT 1
             ) last_msg ON true
-            WHERE c.state IN ('ACTIVE', 'CLOSING')
+            WHERE c.state IN ('ACTIVE', 'PITCH_READY', 'CLOSING')
               AND c.ai_enabled != false
               AND c.last_activity > NOW() - INTERVAL '3 days'
               AND NOT EXISTS (
@@ -221,11 +221,11 @@ async function runActiveLoop() {
                     AND m2.timestamp > NOW() - INTERVAL '5 minutes'
               )
               AND (
-                  -- INBOUND: Lead replied, respond fast
+                  c.state = 'PITCH_READY'
+                  OR
                   (last_msg.direction = 'inbound'
                    AND c.last_activity < NOW() - INTERVAL '2 minutes')
                   OR
-                  -- OUTBOUND NUDGE: They went quiet
                   ((last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
                    AND c.nudge_count < 6
                    AND c.last_activity < NOW() - CASE
