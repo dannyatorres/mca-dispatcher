@@ -129,6 +129,7 @@ async function runDispatcher() {
                     AND m2.direction = 'outbound'
                     AND m2.timestamp > NOW() - INTERVAL '5 minutes'
               )
+              AND c.last_activity > NOW() - INTERVAL '3 days'
               AND (
                   (c.state = 'DRIP' AND c.nudge_count < 4
                    AND c.last_activity < NOW() - CASE
