@@ -326,7 +326,9 @@ function checkDailyReport() {
         console.log('📊 10pm EST - Generating daily report');
 
         const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
-        axios.post(BACKEND_URL.replace('/api/agent/trigger', '/api/daily-reports/generate'), { date: dateStr })
+        axios.post(BACKEND_URL.replace('/api/agent/trigger', '/api/daily-reports/generate'), { date: dateStr }, {
+            headers: { 'x-internal-secret': process.env.INTERNAL_API_SECRET }
+        })
             .then(() => console.log('📊 Daily report triggered via API'))
             .catch(err => console.error('📊 Daily report trigger failed:', err.message));
     }
