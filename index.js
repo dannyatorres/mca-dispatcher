@@ -144,14 +144,17 @@ async function runDispatcher() {
                   (last_msg.direction = 'inbound'
                    AND c.last_activity < NOW() - INTERVAL '2 minutes')
                   OR
-                  (c.state = 'PITCH_READY'
-                   AND last_msg.direction = 'inbound'
-                   AND c.last_activity < NOW() - INTERVAL '2 minutes')
-                  OR
                   (c.state IN ('ACTIVE', 'CLOSING')
                    AND (last_msg.direction = 'outbound' OR last_msg.direction IS NULL)
-                   AND c.nudge_count < 3
-                   AND c.last_activity < NOW() - INTERVAL '15 minutes' * POWER(2, c.nudge_count))
+                   AND c.nudge_count < 6
+                   AND c.last_activity < NOW() - CASE
+                       WHEN c.nudge_count = 0 THEN INTERVAL '15 minutes'
+                       WHEN c.nudge_count = 1 THEN INTERVAL '30 minutes'
+                       WHEN c.nudge_count = 2 THEN INTERVAL '1 hour'
+                       WHEN c.nudge_count = 3 THEN INTERVAL '4 hours'
+                       WHEN c.nudge_count = 4 THEN INTERVAL '8 hours'
+                       ELSE INTERVAL '24 hours'
+                   END)
               )
             FOR UPDATE OF c SKIP LOCKED
             LIMIT $1
@@ -197,31 +200,6 @@ async function runDispatcher() {
                             });
                         }
                     }
-
-                } else if (lead.state === 'QUALIFIED') {
-                    // Lead is qualified - time to soft pitch
-                    const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
-
-                    let instruction;
-                    if (isNudge) {
-                        instruction = 'QUALIFIED FOLLOW-UP: You told them you\'d run the numbers. Come back with good news - mention you reviewed their file and have a solid offer ready. Ask if now is a good time to go over it.';
-                    } else {
-                        instruction = 'QUALIFIED RESPONSE: Lead is qualified and waiting. Present the offer or ask what amount would actually help them.';
-                    }
-
-                    await axios.post(BACKEND_URL, {
-                        conversation_id: lead.id,
-                        system_instruction: instruction,
-                        is_nudge: isNudge
-                    });
-
-                } else if (lead.state === 'PITCH_READY') {
-                    // Commander has strategy, time to pitch
-                    await axios.post(BACKEND_URL, {
-                        conversation_id: lead.id,
-                        system_instruction: 'PITCH: Present the offer confidently.',
-                        is_nudge: true
-                    });
 
                 } else if (lead.state === 'ACTIVE') {
                     const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
