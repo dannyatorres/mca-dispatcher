@@ -223,13 +223,21 @@ async function runDispatcher() {
                         is_nudge: true
                     });
 
-                } else {
-                    // ACTIVE, CLOSING - let AI decide
+                } else if (lead.state === 'ACTIVE') {
                     const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
 
                     await axios.post(BACKEND_URL, {
                         conversation_id: lead.id,
-                        system_instruction: isNudge ? 'NUDGE: Follow up, they went quiet.' : null,
+                        system_instruction: isNudge ? `NUDGE #${lead.nudge_count + 1}` : null,
+                        is_nudge: isNudge
+                    });
+
+                } else if (lead.state === 'CLOSING') {
+                    const isNudge = lead.last_direction === 'outbound' || lead.last_direction === null;
+
+                    await axios.post(BACKEND_URL, {
+                        conversation_id: lead.id,
+                        system_instruction: isNudge ? `NUDGE #${lead.nudge_count + 1}` : null,
                         is_nudge: isNudge
                     });
                 }
